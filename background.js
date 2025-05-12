@@ -8,8 +8,7 @@ const tabContext = new Map();
 const taskExecutions = new Map();
 
 // API Keys
-const OPENAI_API_KEY = "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"; // Replace this with your real OpenAI API key
-
+const OPENAI_API_KEY = "sk-proj-1234567890";
 // Molmo API Configuration
 const MOLMO_API_URL = "http://10.64.77.81:8000/molmo/point"; // Replace with actual Molmo API URL
 
