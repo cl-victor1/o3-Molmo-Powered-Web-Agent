@@ -1,0 +1,195 @@
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f9f9f9;
+}
+
+.container {
+  width: 400px;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  color: #333;
+  margin-top: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+h2 {
+  font-size: 1.2rem;
+  color: #555;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+
+.api-key-section,
+.command-section,
+.response-section {
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #444;
+}
+
+input, textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+textarea {
+  height: 80px;
+  resize: vertical;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-button input {
+  flex-grow: 1;
+}
+
+button {
+  background-color: #4285f4;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #3367d6;
+}
+
+.api-key-message {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ai-response {
+  background-color: #f1f1f1;
+  border-radius: 4px;
+  padding: 12px;
+  min-height: 100px;
+  position: relative;
+}
+
+.loading-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(0, 0, 0, 0.1);
+  border-radius: 50%;
+  border-top-color: #4285f4;
+  animation: spin 1s ease-in-out infinite;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -15px 0 0 -15px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 添加自动执行复选框的样式 */
+.auto-execute-container {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.auto-execute-container label {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+}
+
+.auto-execute-container input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+/* Task status styles */
+.status-container {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.task-status {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+
+.task-status.running {
+  color: #1a73e8;
+}
+
+.task-status.completed {
+  color: #0f9d58;
+}
+
+.task-status.error {
+  color: #ea4335;
+}
+
+.status-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-icon.running {
+  background-color: #1a73e8;
+  animation: pulse 1.5s infinite;
+}
+
+.status-icon.completed {
+  background-color: #0f9d58;
+}
+
+.status-icon.error {
+  background-color: #ea4335;
+}
+
+.background-notice {
+  font-size: 12px;
+  color: #5f6368;
+  font-style: italic;
+  margin-top: 4px;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+} 

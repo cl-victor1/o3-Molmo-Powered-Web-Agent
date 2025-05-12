@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Web Browser AI Agent</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Web Browser AI Agent</h1>
+    
+    <div class="api-key-section" id="apiKeySection">
+      <label for="apiKey">OpenAI API Key:</label>
+      <div class="input-with-button">
+        <input type="password" id="apiKey" placeholder="Enter your API key">
+        <button id="saveApiKey">Save</button>
+      </div>
+      <div class="api-key-message" id="apiKeyMessage"></div>
+    </div>
+    
+    <div class="command-section" id="commandSection">
+      <label for="userCommand">What would you like me to do?</label>
+      <textarea id="userCommand" placeholder="Type your command here... (e.g., 'Search for puppies on Google')"></textarea>
+      <button id="executeCommand">Execute</button>
+    </div>
+    
+    <div class="response-section" id="responseSection">
+      <h2>Response</h2>
+      <div id="aiResponse" class="ai-response">
+        <div class="loading-spinner" id="loadingSpinner" style="display: none;"></div>
+        <p id="responseText">Enter a command above to get started.</p>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html> 
