@@ -472,10 +472,38 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
             if (points && points.length > 0) {
               // Use the first point returned by Molmo
               const point = points[0];
-              console.log(`Molmo found point at coordinates: (${point.x}, ${point.y})`);
+              console.log(`Molmo found point:`, point);
+              
+              // Extract coordinates following the reference pattern
+              let clickX, clickY;
+              
+              if (point.point && Array.isArray(point.point)) {
+                // If point is in the format {point: [x, y]}
+                clickX = parseFloat(point.point[0]);
+                clickY = parseFloat(point.point[1]);
+              } else if (point.x !== undefined && point.y !== undefined) {
+                // If point is in the format {x: value, y: value}
+                clickX = parseFloat(point.x);
+                clickY = parseFloat(point.y);
+              } else {
+                throw new Error('Invalid point format from Molmo API');
+              }
+              
+              // Validate coordinates - ensure they are valid numbers
+              if (isNaN(clickX) || isNaN(clickY)) {
+                throw new Error(`Invalid coordinates from Molmo API: (${clickX}, ${clickY})`);
+              }
+              
+              // If coordinates appear to be normalized (0-100), we might need to scale them
+              // For now, just ensure they're positive and reasonable
+              if (clickX < 0 || clickY < 0 || clickX > 10000 || clickY > 10000) {
+                throw new Error(`Coordinates out of reasonable range: (${clickX}, ${clickY})`);
+              }
+              
+              console.log(`Using validated coordinates: (${clickX}, ${clickY})`);
               
               // Execute click at the coordinates
-              console.log(`Executing click at (${point.x}, ${point.y})`);
+              console.log(`Executing click at (${clickX}, ${clickY})`);
               const clickResult = await chrome.scripting.executeScript({
                 target: { tabId },
                 function: (x, y) => {
@@ -497,7 +525,7 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
                   }
                   return { success: false, element: null };
                 },
-                args: [point.x, point.y]
+                args: [clickX, clickY]
               });
               
               if (clickResult && clickResult[0] && clickResult[0].result && clickResult[0].result.success) {
@@ -909,10 +937,37 @@ async function callMolmoAPI(imageBase64, objectName) {
         return [];
       }
       
-      // Return the points
+      // Process and return the points
       if (result.points && result.points.length > 0) {
-        console.log(`Molmo found ${result.points.length} points. Using first point: ${JSON.stringify(result.points[0])}`);
-        return result.points;
+        console.log(`Molmo found ${result.points.length} points. Raw response:`, result.points);
+        
+        // Process points to ensure they're in a consistent, serializable format
+        const processedPoints = result.points.map(point => {
+          if (typeof point === 'object' && point !== null) {
+            // Extract coordinates and ensure they're basic numbers
+            let x, y;
+            
+            if (point.point && Array.isArray(point.point)) {
+              x = parseFloat(point.point[0]);
+              y = parseFloat(point.point[1]);
+            } else if (point.x !== undefined && point.y !== undefined) {
+              x = parseFloat(point.x);
+              y = parseFloat(point.y);
+            } else {
+              console.warn('Skipping point with unknown format:', point);
+              return null;
+            }
+            
+            // Validate and return as simple object
+            if (!isNaN(x) && !isNaN(y)) {
+              return { point: [x, y] };
+            }
+          }
+          return null;
+        }).filter(point => point !== null);
+        
+        console.log(`Processed ${processedPoints.length} valid points:`, processedPoints);
+        return processedPoints;
       } else {
         console.error('No points found in Molmo API response', result);
         
