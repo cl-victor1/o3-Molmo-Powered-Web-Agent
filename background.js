@@ -11,7 +11,7 @@ const taskExecutions = new Map();
 const OPENAI_API_KEY = "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";
 
 // Molmo API Configuration
-const MOLMO_API_URL = "http://10.64.77.53:8000/molmo/point"; // Replace with actual Molmo API URL
+const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
 
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
@@ -303,6 +303,11 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       - "second video" for the second video
                       - "video titled [title]" for a specific video by title
                       
+                      For Chinese commands:
+                      - "打开第一个视频" or "点击第一个视频" -> {"action": "click", "object_name": "first video"}
+                      - "打开第二个视频" -> {"action": "click", "object_name": "second video"}
+                      - "搜索" commands -> use appropriate search actions
+                      
                       If you need to perform multiple actions, return them as an array:
                       [{"action": "type", "selector": "input#search", "text": "cats"}, 
                        {"action": "click", "selector": "button.search-btn"}]
@@ -352,17 +357,25 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
     // Try to parse action from response
     let actions = null;
     try {
+      console.log('AI Response received:', aiResponse);
       // Extract JSON object or array from the response
       const jsonMatch = aiResponse.match(/(\{.*\}|\[.*\])/s);
+      console.log('JSON match found:', jsonMatch);
       if (jsonMatch) {
+        console.log('Attempting to parse JSON:', jsonMatch[0]);
         actions = JSON.parse(jsonMatch[0]);
+        console.log('Parsed actions:', actions);
+      } else {
+        console.log('No JSON pattern found in AI response');
       }
     } catch (error) {
       console.error('Error parsing action JSON:', error);
+      console.error('Failed to parse:', jsonMatch ? jsonMatch[0] : 'No match');
     }
     
     // If actions are parsed successfully, execute them
     if (actions) {
+      console.log('Actions successfully parsed. AutoExecute mode:', autoExecute);
       if (autoExecute) {
         console.log('Auto-execute mode enabled, executing all actions:', actions);
         // Execute actions via content script and follow through to completion
@@ -374,6 +387,7 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
         return aiResponse;
       }
     } else {
+      console.log('No actions parsed from AI response, returning raw response');
       // If no actions could be parsed, just return the AI response
       return aiResponse;
     }
@@ -451,7 +465,9 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
             }
             
             // Call Molmo API to get points
+            console.log('About to call Molmo API...');
             const points = await callMolmoAPI(base64Image, formattedObjectName);
+            console.log('Molmo API call completed, received points:', points);
             
             if (points && points.length > 0) {
               // Use the first point returned by Molmo
@@ -846,6 +862,7 @@ async function callMolmoAPI(imageBase64, objectName) {
       
       // Create the fetch promise
       console.log(`Sending request to Molmo API at: ${MOLMO_API_URL}`);
+      console.log('Request data:', { ...requestData, image_base64: `[${requestData.image_base64.length} chars]` });
       const fetchPromise = fetch(`${MOLMO_API_URL}`, {
         method: 'POST',
         headers: {
