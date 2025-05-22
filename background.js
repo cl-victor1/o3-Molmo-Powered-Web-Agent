@@ -8,9 +8,10 @@ const tabContext = new Map();
 const taskExecutions = new Map();
 
 // API Keys
-const OPENAI_API_KEY = "sk-proj-1234567890";
+const OPENAI_API_KEY = "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";
+
 // Molmo API Configuration
-const MOLMO_API_URL = "http://10.64.77.81:8000/molmo/point"; // Replace with actual Molmo API URL
+const MOLMO_API_URL = "http://10.64.77.53:8000/molmo/point"; // Replace with actual Molmo API URL
 
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
@@ -38,6 +39,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       startTime: Date.now()
     };
     taskExecutions.set(tabId, taskStatus);
+    
+    // Set a global timeout for the task (5 minutes)
+    const globalTimeout = setTimeout(() => {
+      const currentStatus = taskExecutions.get(tabId);
+      if (currentStatus && currentStatus.running) {
+        console.log(`Task timeout reached for tab ${tabId}. Stopping task.`);
+        currentStatus.running = false;
+        currentStatus.stopped = true;
+        currentStatus.error = 'Task timeout - execution stopped after 5 minutes';
+        currentStatus.endTime = Date.now();
+      }
+    }, 300000); // 5 minutes
+    
+    taskStatus.globalTimeout = globalTimeout;
     
     // Process the command with OpenAI (use default API key if none provided)
     const taskPromise = processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute);
@@ -69,6 +84,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           taskStatus.completed = true;
           taskStatus.result = result;
           taskStatus.endTime = Date.now();
+          
+          // Clear the global timeout
+          if (taskStatus.globalTimeout) {
+            clearTimeout(taskStatus.globalTimeout);
+          }
         }
       })
       .catch(error => {
@@ -79,6 +99,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           taskStatus.completed = false;
           taskStatus.error = error.message;
           taskStatus.endTime = Date.now();
+          
+          // Clear the global timeout
+          if (taskStatus.globalTimeout) {
+            clearTimeout(taskStatus.globalTimeout);
+          }
         }
       });
     
@@ -90,6 +115,28 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     const { tabId } = request;
     const status = taskExecutions.get(tabId) || { running: false };
     sendResponse(status);
+    return true;
+  }
+  
+  // Handle request to stop/clear a running task
+  if (request.action === 'stopTask') {
+    const { tabId } = request;
+    if (taskExecutions.has(tabId)) {
+      const taskStatus = taskExecutions.get(tabId);
+      taskStatus.running = false;
+      taskStatus.stopped = true;
+      taskStatus.endTime = Date.now();
+      
+      // Clear the global timeout
+      if (taskStatus.globalTimeout) {
+        clearTimeout(taskStatus.globalTimeout);
+      }
+      
+      console.log(`Task stopped manually for tab ${tabId}`);
+      sendResponse({ success: true, message: 'Task stopped successfully' });
+    } else {
+      sendResponse({ success: false, message: 'No running task found for this tab' });
+    }
     return true;
   }
   
@@ -119,6 +166,29 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       lastResponse: context.lastResponse
     });
     
+    return true;
+  }
+  
+  // Handle setting API key
+  if (request.action === 'setApiKey') {
+    const { apiKey } = request;
+    
+    // Store API key in Chrome storage
+    chrome.storage.sync.set({ 'openai_api_key': apiKey }, function() {
+      OPENAI_API_KEY = apiKey;
+      console.log('OpenAI API key saved to storage');
+      sendResponse({ success: true });
+    });
+    
+    return true;
+  }
+  
+  // Handle getting API key status
+  if (request.action === 'getApiKeyStatus') {
+    sendResponse({ 
+      hasApiKey: !!OPENAI_API_KEY,
+      apiKeySet: !!OPENAI_API_KEY
+    });
     return true;
   }
 });
@@ -158,15 +228,21 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
-      // Execute content script to get page information
-      const result = await chrome.scripting.executeScript({
-        target: { tabId },
-        function: getPageContent
-      });
-      
-      // Extract page content from script execution result
-      if (result && result[0] && result[0].result) {
-        pageContent = result[0].result;
+      // Check if the URL is accessible
+      if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('moz-extension://') || tab.url.startsWith('edge://')) {
+        console.log('Cannot access restricted URL for content extraction:', tab.url);
+        pageContent = `Restricted URL: ${tab.url}`;
+      } else {
+        // Execute content script to get page information
+        const result = await chrome.scripting.executeScript({
+          target: { tabId },
+          function: getPageContent
+        });
+        
+        // Extract page content from script execution result
+        if (result && result[0] && result[0].result) {
+          pageContent = result[0].result;
+        }
       }
     } catch (error) {
       console.error('Error getting page content:', error);
@@ -184,12 +260,18 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
       conversationHistory = conversationHistory.slice(conversationHistory.length - 10);
     }
     
+    // Check if we have an API key
+    const finalApiKey = apiKey || OPENAI_API_KEY;
+    if (!finalApiKey) {
+      throw new Error('No OpenAI API key available. Please set your API key in the extension popup.');
+    }
+    
     // Call OpenAI API
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey || OPENAI_API_KEY}`
+        'Authorization': `Bearer ${finalApiKey}`
       },
       body: JSON.stringify({
         model: 'o3',
@@ -202,16 +284,24 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       
                       You can use these actions:
                       {"action": "click", "selector": "button.submit-btn"}
+                      {"action": "click", "object_name": "search button"}
                       {"action": "type", "selector": "input#search", "text": "search query"}
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
                       {"action": "scroll", "direction": "down", "amount": 500}
-                      {"action": "pointing", "object_name": "search button"}
                       
-                      For the "pointing" action, you should use the format "pointing: Point to {object_name}" 
-                      where object_name is a clear description of what to click on the screen. This uses 
-                      the Molmo API to identify objects on the screen even without precise selectors.
+                      For the "click" action, you can use either:
+                      1. CSS selector: {"action": "click", "selector": "button.submit-btn"}
+                      2. Visual description: {"action": "click", "object_name": "search button"}
+                      
+                      When using object_name, provide a clear description of what to click on the screen. 
+                      This uses the Molmo API to identify objects visually even without precise selectors.
+                      
+                      IMPORTANT: For YouTube videos, use specific descriptions like:
+                      - "first video" or "first video thumbnail" for the first video in the list
+                      - "second video" for the second video
+                      - "video titled [title]" for a specific video by title
                       
                       If you need to perform multiple actions, return them as an array:
                       [{"action": "type", "selector": "input#search", "text": "cats"}, 
@@ -219,7 +309,11 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       
                       For complex tasks that might require visual understanding:
                       [{"action": "type", "selector": "input#search", "text": "cats"},
-                       {"action": "pointing", "object_name": "search button"}]
+                       {"action": "click", "object_name": "search button"}]
+                      
+                      For YouTube-specific tasks:
+                      - To open the first video: {"action": "click", "object_name": "first video"}
+                      - To open a specific video: {"action": "click", "object_name": "video titled [specific title]"}
                       
                       If you can't automate the task, explain why and provide guidance instead.`
           },
@@ -291,6 +385,11 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
 
 // Function to execute actions in a tab via content script
 async function executeActionsInTab(tabId, actions) {
+  return await executeActionsInTabWithDepth(tabId, actions, 0);
+}
+
+// Function to execute actions in a tab via content script with recursion depth tracking
+async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) {
   // If actions is not an array, make it one
   if (!Array.isArray(actions)) {
     actions = [actions];
@@ -299,130 +398,247 @@ async function executeActionsInTab(tabId, actions) {
   try {
     // Execute each action in sequence
     for (let i = 0; i < actions.length; i++) {
-      const action = actions[i];
-      console.log(`Executing action ${i+1}/${actions.length}:`, action);
+      // Check if task has been stopped
+      const taskStatus = taskExecutions.get(tabId);
+      if (taskStatus && taskStatus.stopped) {
+        console.log('Task execution stopped by user request');
+        return 'Task execution stopped by user request';
+      }
       
-      // Handle pointing action with Molmo API
-      if (action.action === 'pointing') {
-        try {
-          console.log(`Starting pointing action for object: "${action.object_name}"`);
-          
-          // Capture screenshot
-          console.log('Capturing screenshot...');
-          const dataUrl = await captureScreenshot(tabId);
-          
-          // Convert data URL to base64
-          const base64Image = dataUrl.split(',')[1];
-          console.log('Screenshot captured successfully, size:', base64Image.length);
-          
-          // Format the object name as required by Molmo
-          const formattedObjectName = `pointing: Point to ${action.object_name}`;
-          
-          console.log(`Calling Molmo API to locate: "${action.object_name}" with prompt: "${formattedObjectName}"`);
-          
-          // Call Molmo API to get points
-          const points = await callMolmoAPI(base64Image, formattedObjectName);
-          
-          if (points && points.length > 0) {
-            // Use the first point returned by Molmo
-            const point = points[0];
-            console.log(`Molmo found point at coordinates: (${point.x}, ${point.y})`);
+      const action = actions[i];
+      console.log(`Executing action ${i+1}/${actions.length} (depth ${recursionDepth}):`, action);
+      
+      // Handle click action (both selector-based and visual object-based)
+      if (action.action === 'click') {
+        // Check if this is a visual click (object_name) or selector-based click
+        if (action.object_name) {
+          // Visual click using Molmo API
+          try {
+            console.log(`Starting visual click action for object: "${action.object_name}"`);
             
-            // Execute click at the coordinates
-            console.log(`Executing click at (${point.x}, ${point.y})`);
-            const clickResult = await chrome.scripting.executeScript({
-              target: { tabId },
-              function: (x, y) => {
-                // Create and dispatch a click event at the specified coordinates
-                const clickEvent = new MouseEvent('click', {
-                  view: window,
-                  bubbles: true,
-                  cancelable: true,
-                  clientX: x,
-                  clientY: y
-                });
-                
-                // Find the element at the position and click it
-                const element = document.elementFromPoint(x, y);
-                if (element) {
-                  console.log('Found element to click:', element.tagName, element.id || '', element.className || '');
-                  element.dispatchEvent(clickEvent);
-                  return { success: true, element: element.tagName };
+            // Check if we can access this tab first
+            const tab = await new Promise((resolve, reject) => {
+              chrome.tabs.get(tabId, (tab) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(`Cannot access tab: ${chrome.runtime.lastError.message}`));
+                } else {
+                  resolve(tab);
                 }
-                return { success: false, element: null };
-              },
-              args: [point.x, point.y]
+              });
             });
             
-            if (clickResult && clickResult[0] && clickResult[0].result && clickResult[0].result.success) {
-              console.log(`Successfully clicked on ${clickResult[0].result.element} element`);
-            } else {
-              console.warn('Click dispatched, but no element was found at the coordinates');
+            // Check if the URL is accessible
+            if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('moz-extension://') || tab.url.startsWith('edge://')) {
+              throw new Error(`Cannot perform visual click on restricted URL: ${tab.url}. Please navigate to a regular webpage first.`);
             }
             
-            // Wait a short time after clicking
-            console.log('Waiting after click...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            console.log('Wait complete');
-          } else {
-            console.error('No points returned from Molmo API');
-            throw new Error(`Failed to locate "${action.object_name}" on screen`);
-          }
-        } catch (error) {
-          console.error('Error with Molmo pointing action:', error);
-          throw error;
-        }
-      } else {
-        // For non-pointing actions, send to content script
-        await new Promise((resolve, reject) => {
-          // Use a try-catch block to handle potential errors with chrome.tabs.sendMessage
-          try {
-            chrome.tabs.sendMessage(tabId, {
-              action: 'executeActions',
-              actions: [action]  // Send as array with single action
-            }, response => {
-              // Check for runtime error first
-              if (chrome.runtime.lastError) {
-                console.log('Content script not ready, injecting it first:', chrome.runtime.lastError);
-                // If content script is not loaded, inject it first
-                chrome.scripting.executeScript({
-                  target: { tabId },
-                  files: ['content.js']
-                }, () => {
-                  // Check for injection errors
-                  if (chrome.runtime.lastError) {
-                    console.error('Failed to inject content script:', chrome.runtime.lastError);
-                    reject(chrome.runtime.lastError);
-                    return;
-                  }
+            // Capture screenshot
+            console.log('Capturing screenshot...');
+            const dataUrl = await captureScreenshot(tabId);
+            
+            // Convert data URL to base64
+            const base64Image = dataUrl.split(',')[1];
+            console.log('Screenshot captured successfully, size:', base64Image.length);
+            
+            // Format the object name as required by Molmo
+            const formattedObjectName = `pointing: Point to ${action.object_name}`;
+            
+            console.log(`Calling Molmo API to locate: "${action.object_name}" with prompt: "${formattedObjectName}"`);
+            
+            // Add special handling for YouTube video elements
+            if (tab.url.includes('youtube.com') && action.object_name.includes('video')) {
+              console.log('YouTube context detected - optimizing for video element detection');
+            }
+            
+            // Call Molmo API to get points
+            const points = await callMolmoAPI(base64Image, formattedObjectName);
+            
+            if (points && points.length > 0) {
+              // Use the first point returned by Molmo
+              const point = points[0];
+              console.log(`Molmo found point at coordinates: (${point.x}, ${point.y})`);
+              
+              // Execute click at the coordinates
+              console.log(`Executing click at (${point.x}, ${point.y})`);
+              const clickResult = await chrome.scripting.executeScript({
+                target: { tabId },
+                function: (x, y) => {
+                  // Create and dispatch a click event at the specified coordinates
+                  const clickEvent = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: x,
+                    clientY: y
+                  });
                   
-                  // Retry sending the message after script is injected
-                  setTimeout(() => {
-                    chrome.tabs.sendMessage(tabId, {
-                      action: 'executeActions',
-                      actions: [action]
-                    }, secondResponse => {
-                      if (chrome.runtime.lastError) {
-                        console.error('Error in second attempt:', chrome.runtime.lastError);
-                        reject(chrome.runtime.lastError);
-                      } else if (secondResponse && secondResponse.success) {
-                        resolve(secondResponse);
-                      } else {
-                        reject(new Error(`Failed to execute action: ${action.action}`));
-                      }
-                    });
-                  }, 500);
-                });
-              } else if (response && response.success) {
-                resolve(response);
+                  // Find the element at the position and click it
+                  const element = document.elementFromPoint(x, y);
+                  if (element) {
+                    console.log('Found element to click:', element.tagName, element.id || '', element.className || '');
+                    element.dispatchEvent(clickEvent);
+                    return { success: true, element: element.tagName };
+                  }
+                  return { success: false, element: null };
+                },
+                args: [point.x, point.y]
+              });
+              
+              if (clickResult && clickResult[0] && clickResult[0].result && clickResult[0].result.success) {
+                console.log(`Successfully clicked on ${clickResult[0].result.element} element`);
               } else {
-                reject(new Error(`Failed to execute action: ${action.action}`));
+                console.warn('Click dispatched, but no element was found at the coordinates');
+              }
+              
+              // Wait a short time after clicking
+              console.log('Waiting after click...');
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              console.log('Wait complete');
+            } else {
+              console.error('No points returned from Molmo API');
+              throw new Error(`Failed to locate "${action.object_name}" on screen`);
+            }
+          } catch (error) {
+            console.error('Error with visual click action:', error);
+            throw error;
+          }
+        } else if (action.selector) {
+          // Traditional selector-based click - send to content script
+          await new Promise((resolve, reject) => {
+            // First check if we can access this tab
+            chrome.tabs.get(tabId, (tab) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(`Cannot access tab: ${chrome.runtime.lastError.message}`));
+                return;
+              }
+              
+              // Check if the URL is accessible
+              if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('moz-extension://') || tab.url.startsWith('edge://')) {
+                reject(new Error(`Cannot execute actions on restricted URL: ${tab.url}. Please navigate to a regular webpage first.`));
+                return;
+              }
+              
+              // Use a try-catch block to handle potential errors with chrome.tabs.sendMessage
+              try {
+                chrome.tabs.sendMessage(tabId, {
+                  action: 'executeActions',
+                  actions: [action]  // Send as array with single action
+                }, response => {
+                  // Check for runtime error first
+                  if (chrome.runtime.lastError) {
+                    console.log('Content script not ready, injecting it first:', chrome.runtime.lastError);
+                    // If content script is not loaded, inject it first
+                    chrome.scripting.executeScript({
+                      target: { tabId },
+                      files: ['content.js']
+                    }, () => {
+                      // Check for injection errors
+                      if (chrome.runtime.lastError) {
+                        console.error('Failed to inject content script:', chrome.runtime.lastError);
+                        reject(chrome.runtime.lastError);
+                        return;
+                      }
+                      
+                      // Retry sending the message after script is injected
+                      setTimeout(() => {
+                        chrome.tabs.sendMessage(tabId, {
+                          action: 'executeActions',
+                          actions: [action]
+                        }, secondResponse => {
+                          if (chrome.runtime.lastError) {
+                            console.error('Error in second attempt:', chrome.runtime.lastError);
+                            reject(chrome.runtime.lastError);
+                          } else if (secondResponse && secondResponse.success) {
+                            resolve(secondResponse);
+                          } else {
+                            reject(new Error(`Failed to execute action: ${action.action}`));
+                          }
+                        });
+                      }, 500);
+                    });
+                  } else if (response && response.success) {
+                    resolve(response);
+                  } else {
+                    reject(new Error(`Failed to execute action: ${action.action}`));
+                  }
+                });
+              } catch (error) {
+                console.error('Error sending message to tab:', error);
+                reject(error);
               }
             });
-          } catch (error) {
-            console.error('Error sending message to tab:', error);
-            reject(error);
-          }
+          });
+        } else {
+          throw new Error('Click action must have either "selector" or "object_name" property');
+        }
+        
+        // Wait a short time after click action
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+        // For non-click actions, send to content script
+        await new Promise((resolve, reject) => {
+          // First check if we can access this tab
+          chrome.tabs.get(tabId, (tab) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(`Cannot access tab: ${chrome.runtime.lastError.message}`));
+              return;
+            }
+            
+            // Check if the URL is accessible
+            if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('moz-extension://') || tab.url.startsWith('edge://')) {
+              reject(new Error(`Cannot execute actions on restricted URL: ${tab.url}. Please navigate to a regular webpage first.`));
+              return;
+            }
+            
+            // Use a try-catch block to handle potential errors with chrome.tabs.sendMessage
+            try {
+              chrome.tabs.sendMessage(tabId, {
+                action: 'executeActions',
+                actions: [action]  // Send as array with single action
+              }, response => {
+                // Check for runtime error first
+                if (chrome.runtime.lastError) {
+                  console.log('Content script not ready, injecting it first:', chrome.runtime.lastError);
+                  // If content script is not loaded, inject it first
+                  chrome.scripting.executeScript({
+                    target: { tabId },
+                    files: ['content.js']
+                  }, () => {
+                    // Check for injection errors
+                    if (chrome.runtime.lastError) {
+                      console.error('Failed to inject content script:', chrome.runtime.lastError);
+                      reject(chrome.runtime.lastError);
+                      return;
+                    }
+                    
+                    // Retry sending the message after script is injected
+                    setTimeout(() => {
+                      chrome.tabs.sendMessage(tabId, {
+                        action: 'executeActions',
+                        actions: [action]
+                      }, secondResponse => {
+                        if (chrome.runtime.lastError) {
+                          console.error('Error in second attempt:', chrome.runtime.lastError);
+                          reject(chrome.runtime.lastError);
+                        } else if (secondResponse && secondResponse.success) {
+                          resolve(secondResponse);
+                        } else {
+                          reject(new Error(`Failed to execute action: ${action.action}`));
+                        }
+                      });
+                    }, 500);
+                  });
+                } else if (response && response.success) {
+                  resolve(response);
+                } else {
+                  reject(new Error(`Failed to execute action: ${action.action}`));
+                }
+              });
+            } catch (error) {
+              console.error('Error sending message to tab:', error);
+              reject(error);
+            }
+          });
         });
         
         // Wait a short time between actions
@@ -431,7 +647,7 @@ async function executeActionsInTab(tabId, actions) {
     }
     
     // After executing all actions, analyze the page to check task completion
-    return await analyzePageAndContinue(tabId);
+    return await analyzePageAndContinue(tabId, recursionDepth);
     
   } catch (error) {
     console.error('Error executing actions:', error);
@@ -440,8 +656,23 @@ async function executeActionsInTab(tabId, actions) {
 }
 
 // Function to analyze the current page and determine if task is complete
-async function analyzePageAndContinue(tabId) {
+async function analyzePageAndContinue(tabId, recursionDepth = 0) {
+  const MAX_RECURSION_DEPTH = 3; // Prevent infinite loops
+  
   try {
+    // Check if task has been stopped
+    const taskStatus = taskExecutions.get(tabId);
+    if (taskStatus && taskStatus.stopped) {
+      console.log('Task analysis stopped by user request');
+      return 'Task analysis stopped by user request';
+    }
+    
+    // Check recursion depth to prevent infinite loops
+    if (recursionDepth >= MAX_RECURSION_DEPTH) {
+      console.log(`Maximum recursion depth (${MAX_RECURSION_DEPTH}) reached. Stopping task execution.`);
+      return "Task execution stopped after maximum attempts. The task may be complete or require manual intervention.";
+    }
+    
     // Get the current tab URL
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = tab.url;
@@ -476,13 +707,15 @@ async function analyzePageAndContinue(tabId) {
     });
     
     // Call OpenAI API to analyze task completion
-    const apiKey = OPENAI_API_KEY; // Use default API key from background script
+    if (!OPENAI_API_KEY) {
+      throw new Error('No OpenAI API key available for task analysis.');
+    }
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         model: 'o3',
@@ -493,6 +726,10 @@ async function analyzePageAndContinue(tabId) {
                       Analyze the current page content and URL to determine if the user's task has been completed.
                       If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
                       If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by a JSON array of actions needed to complete the task.
+                      
+                      IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
+                      consider the task completed rather than continuing indefinitely.
+                      
                       Use the following action formats:
                       {"action": "click", "selector": "button.submit-btn"}
                       {"action": "type", "selector": "input#search", "text": "search query"}
@@ -500,7 +737,7 @@ async function analyzePageAndContinue(tabId) {
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
                       {"action": "scroll", "direction": "down", "amount": 500}
-                      {"action": "pointing", "object_name": "search button"}`
+                      {"action": "click", "object_name": "search button"}`
           },
           ...conversationHistory
         ],
@@ -541,10 +778,10 @@ async function analyzePageAndContinue(tabId) {
         const actionsMatch = aiResponse.match(/(\[.*\])/s);
         if (actionsMatch) {
           const nextActions = JSON.parse(actionsMatch[0]);
-          console.log('Task incomplete, executing additional actions:', nextActions);
+          console.log(`Task incomplete (depth ${recursionDepth}), executing additional actions:`, nextActions);
           
-          // Execute the next set of actions
-          await executeActionsInTab(tabId, nextActions);
+          // Execute the next set of actions with recursion tracking
+          await executeActionsInTabWithDepth(tabId, nextActions, recursionDepth + 1);
           return aiResponse;
         }
       } catch (error) {
@@ -562,12 +799,26 @@ async function analyzePageAndContinue(tabId) {
 // Function to capture screenshot of current tab
 async function captureScreenshot(tabId) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab(null, { format: 'png' }, dataUrl => {
+    // First check if we can access this tab
+    chrome.tabs.get(tabId, (tab) => {
       if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(dataUrl);
+        reject(new Error(`Cannot access tab: ${chrome.runtime.lastError.message}`));
+        return;
       }
+      
+      // Check if the URL is a chrome:// URL or other restricted URL
+      if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('moz-extension://') || tab.url.startsWith('edge://')) {
+        reject(new Error(`Cannot capture screenshot of restricted URL: ${tab.url}`));
+        return;
+      }
+      
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }, dataUrl => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(`Screenshot capture failed: ${chrome.runtime.lastError.message}`));
+        } else {
+          resolve(dataUrl);
+        }
+      });
     });
   });
 }
@@ -590,7 +841,7 @@ async function callMolmoAPI(imageBase64, objectName) {
       
       // Create a timeout promise
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Molmo API request timeout')), 60000)
+        setTimeout(() => reject(new Error('Molmo API request timeout')), 30000)
       );
       
       // Create the fetch promise

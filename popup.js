@@ -97,8 +97,29 @@ document.addEventListener('DOMContentLoaded', function() {
       taskStatusElement.innerHTML = `
         <span class="status-icon running"></span>
         Task "${status.command}" running (${runningTime}s)
+        <button id="stopTaskButton" class="stop-button">Stop Task</button>
       `;
       taskStatusElement.className = 'task-status running';
+      
+      // Add event listener to stop button
+      const stopButton = document.getElementById('stopTaskButton');
+      stopButton.addEventListener('click', function() {
+        chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+          const activeTab = tabs[0];
+          chrome.runtime.sendMessage({
+            action: 'stopTask',
+            tabId: activeTab.id
+          }, function(response) {
+            if (response && response.success) {
+              taskStatusElement.innerHTML = `
+                <span class="status-icon stopped"></span>
+                Task stopped by user
+              `;
+              taskStatusElement.className = 'task-status stopped';
+            }
+          });
+        });
+      });
       
       // Set timer to update the running time
       setTimeout(() => {
@@ -116,6 +137,12 @@ document.addEventListener('DOMContentLoaded', function() {
         Task completed successfully
       `;
       taskStatusElement.className = 'task-status completed';
+    } else if (status && status.stopped) {
+      taskStatusElement.innerHTML = `
+        <span class="status-icon stopped"></span>
+        Task stopped by user
+      `;
+      taskStatusElement.className = 'task-status stopped';
     } else if (status && status.error) {
       taskStatusElement.innerHTML = `
         <span class="status-icon error"></span>
@@ -247,6 +274,10 @@ document.addEventListener('DOMContentLoaded', function() {
       color: #ea4335;
     }
     
+    .task-status.stopped {
+      color: #ff9800;
+    }
+    
     .status-icon {
       display: inline-block;
       width: 10px;
@@ -266,6 +297,25 @@ document.addEventListener('DOMContentLoaded', function() {
     
     .status-icon.error {
       background-color: #ea4335;
+    }
+    
+    .status-icon.stopped {
+      background-color: #ff9800;
+    }
+    
+    .stop-button {
+      margin-left: auto;
+      padding: 4px 8px;
+      background-color: #ea4335;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    
+    .stop-button:hover {
+      background-color: #d33b2c;
     }
     
     .background-notice {
