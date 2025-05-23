@@ -8,7 +8,7 @@ const tabContext = new Map();
 const taskExecutions = new Map();
 
 // API Keys
-const OPENAI_API_KEY = "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";
+const OPENAI_API_KEY = "";
 
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
@@ -303,10 +303,6 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       - "second video" for the second video
                       - "video titled [title]" for a specific video by title
                       
-                      For Chinese commands:
-                      - "打开第一个视频" or "点击第一个视频" -> {"action": "click", "object_name": "first video"}
-                      - "打开第二个视频" -> {"action": "click", "object_name": "second video"}
-                      - "搜索" commands -> use appropriate search actions
                       
                       If you need to perform multiple actions, return them as an array:
                       [{"action": "type", "selector": "input#search", "text": "cats"}, 

@@ -21,9 +21,9 @@ AI-powered web browser automation using natural language commands with Molmo API
 The extension has specialized support for YouTube interactions. Here are some example commands:
 
 ### Opening Videos
-- **"打开第一个视频"** (Open the first video)
-- **"点击第一个视频"** (Click the first video)
-- **"播放第一个视频"** (Play the first video)
+- **"Open the first video"** (Open the first video)
+- **"Click the first video"** (Click the first video)
+- **"Play the first video"** (Play the first video)
 - **"Open the first video"**
 - **"Click on the second video"**
 - **"Play the video titled [specific title]"**
@@ -39,7 +39,7 @@ The extension has specialized support for YouTube interactions. Here are some ex
 ### Example Flow
 
 ```
-User Input: "打开第一个视频"
+User Input: "Open the first video"
 ↓
 OpenAI Response: {"action": "click", "object_name": "first video"}
 ↓

@@ -107,7 +107,7 @@ button:hover {
   to { transform: rotate(360deg); }
 }
 
-/* 添加自动执行复选框的样式 */
+/* Add auto-execute checkbox styles */
 .auto-execute-container {
   margin-top: 10px;
   margin-bottom: 10px;
