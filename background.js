@@ -8,10 +8,31 @@ const tabContext = new Map();
 const taskExecutions = new Map();
 
 // API Keys
-const OPENAI_API_KEY = "";
+let OPENAI_API_KEY = "";
 
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
+const MOLMO_OFFICIAL_API_URL = "https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream"; // Official Molmo API
+let MOLMO_API_KEY = ""; // Add your Molmo API key here
+
+// Molmo API selection: 'local' or 'official'
+let MOLMO_API_TYPE = 'local'; // Change to 'official' to use the official API
+
+// Load saved API keys and configuration on startup
+chrome.storage.sync.get(['openai_api_key', 'molmo_api_key', 'molmo_api_type'], function(result) {
+  if (result.openai_api_key) {
+    OPENAI_API_KEY = result.openai_api_key;
+    console.log('Loaded OpenAI API key from storage');
+  }
+  if (result.molmo_api_key) {
+    MOLMO_API_KEY = result.molmo_api_key;
+    console.log('Loaded Molmo API key from storage');
+  }
+  if (result.molmo_api_type) {
+    MOLMO_API_TYPE = result.molmo_api_type;
+    console.log('Loaded Molmo API type from storage:', MOLMO_API_TYPE);
+  }
+});
 
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
@@ -188,6 +209,51 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     sendResponse({ 
       hasApiKey: !!OPENAI_API_KEY,
       apiKeySet: !!OPENAI_API_KEY
+    });
+    return true;
+  }
+  
+  // Handle setting Molmo API key
+  if (request.action === 'setMolmoApiKey') {
+    const { apiKey } = request;
+    
+    // Store Molmo API key in Chrome storage
+    chrome.storage.sync.set({ 'molmo_api_key': apiKey }, function() {
+      MOLMO_API_KEY = apiKey;
+      console.log('Molmo API key saved to storage');
+      sendResponse({ success: true });
+    });
+    
+    return true;
+  }
+  
+  // Handle getting Molmo API key status
+  if (request.action === 'getMolmoApiKeyStatus') {
+    sendResponse({ 
+      hasApiKey: !!MOLMO_API_KEY,
+      apiKeySet: !!MOLMO_API_KEY
+    });
+    return true;
+  }
+  
+  // Handle setting Molmo API type
+  if (request.action === 'setMolmoApiType') {
+    const { apiType } = request;
+    
+    // Store Molmo API type in Chrome storage
+    chrome.storage.sync.set({ 'molmo_api_type': apiType }, function() {
+      MOLMO_API_TYPE = apiType;
+      console.log('Molmo API type saved to storage:', apiType);
+      sendResponse({ success: true });
+    });
+    
+    return true;
+  }
+  
+  // Handle getting Molmo API type
+  if (request.action === 'getMolmoApiType') {
+    sendResponse({ 
+      apiType: MOLMO_API_TYPE
     });
     return true;
   }
@@ -863,8 +929,177 @@ async function captureScreenshot(tabId) {
   });
 }
 
-// Function to call Molmo API
+// Function to call Official Molmo API (based on test_molmo_api.py)
+async function callMolmoOfficialAPI(imageBase64, objectName) {
+  const MAX_RETRIES = 3;
+  let retryCount = 0;
+  
+  // Check if we have the API key
+  if (!MOLMO_API_KEY) {
+    throw new Error('No Molmo API key available. Please set your Molmo API key in the extension.');
+  }
+  
+  while (retryCount < MAX_RETRIES) {
+    try {
+      console.log(`Calling Official Molmo API with object name: ${objectName} (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      
+      // Prepare API request data following the official API format
+      const requestData = {
+        input_text: [`pointing: Point to ${objectName}`],
+        input_image: [imageBase64]
+      };
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Official Molmo API request timeout')), 60000) // Longer timeout for official API
+      );
+      
+      // Create the fetch promise
+      console.log(`Sending request to Official Molmo API at: ${MOLMO_OFFICIAL_API_URL}`);
+      console.log('Request data:', { ...requestData, input_image: [`[${requestData.input_image[0].length} chars]`] });
+      const fetchPromise = fetch(MOLMO_OFFICIAL_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${MOLMO_API_KEY}`
+        },
+        body: JSON.stringify(requestData)
+      });
+      
+      // Race between fetch and timeout
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      // Check response status
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error calling Official Molmo API: ${response.status} - ${errorText}`);
+        
+        // Increase retry count and try again after delay
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          const delay = 2000 * retryCount; // Exponential backoff
+          console.log(`Will retry in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        return [];
+      }
+      
+      // Parse the streaming response
+      let responseText = '';
+      
+      // Handle streaming response (following test_molmo_api.py pattern)
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.result && parsed.result.output && parsed.result.output.text) {
+                  responseText += parsed.result.output.text;
+                }
+              } catch (parseError) {
+                // Ignore parsing errors for incomplete chunks
+                console.debug('Ignoring incomplete chunk:', line);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      
+      console.log('Received full response from Official Molmo API:', responseText);
+      
+      // Parse coordinates from the response text
+      // The response typically contains coordinate information
+      const points = parseCoordinatesFromText(responseText);
+      
+      if (points && points.length > 0) {
+        console.log(`Official Molmo found ${points.length} points:`, points);
+        return points;
+      } else {
+        console.error('No points found in Official Molmo API response');
+        
+        // Increase retry count and try again after delay
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          const delay = 2000 * retryCount; // Exponential backoff
+          console.log(`Will retry in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        return [];
+      }
+    } catch (error) {
+      console.error('Error calling Official Molmo API:', error);
+      
+      // Increase retry count and try again after delay
+      retryCount++;
+      if (retryCount < MAX_RETRIES) {
+        const delay = 2000 * retryCount; // Exponential backoff
+        console.log(`Will retry in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      return [];
+    }
+  }
+  
+  // All retries failed
+  console.error(`Failed to get a valid response from Official Molmo API after ${MAX_RETRIES} attempts`);
+  return [];
+}
+
+// Helper function to parse coordinates from text response
+function parseCoordinatesFromText(text) {
+  const points = [];
+  
+  // Look for coordinate patterns in the text
+  // This might need to be adjusted based on the actual response format from the official API
+  const coordPatterns = [
+    /\[(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\]/g, // [x, y] format
+    /\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)/g, // (x, y) format
+    /x[:\s]*(\d+(?:\.\d+)?)[,\s]+y[:\s]*(\d+(?:\.\d+)?)/gi, // x: 100, y: 200 format
+  ];
+  
+  for (const pattern of coordPatterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const x = parseFloat(match[1]);
+      const y = parseFloat(match[2]);
+      
+      if (!isNaN(x) && !isNaN(y)) {
+        points.push({ point: [x, y] });
+      }
+    }
+  }
+  
+  return points;
+}
+
+// Function to call Molmo API (router that chooses between local and official APIs)
 async function callMolmoAPI(imageBase64, objectName) {
+  console.log(`Using Molmo API type: ${MOLMO_API_TYPE}`);
+  
+  if (MOLMO_API_TYPE === 'official') {
+    return await callMolmoOfficialAPI(imageBase64, objectName);
+  } else {
+    return await callMolmoLocalAPI(imageBase64, objectName);
+  }
+}
+
+// Function to call Local Molmo API (renamed from original callMolmoAPI)
+async function callMolmoLocalAPI(imageBase64, objectName) {
   const MAX_RETRIES = 3;
   let retryCount = 0;
   

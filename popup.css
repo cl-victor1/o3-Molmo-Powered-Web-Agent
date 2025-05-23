@@ -32,6 +32,52 @@ h2 {
   margin-bottom: 20px;
 }
 
+/* Molmo API configuration styles */
+.molmo-config-section {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e1e4e8;
+}
+
+.molmo-config-section h3 {
+  font-size: 1.1rem;
+  color: #333;
+  margin: 0 0 15px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.api-type-selector {
+  margin-bottom: 15px;
+}
+
+.api-type-selector select {
+  width: 70%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-right: 8px;
+}
+
+.api-type-selector button {
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.molmo-api-key-section {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e1e4e8;
+}
+
+.molmo-api-key-section label {
+  color: #444;
+  font-size: 14px;
+}
+
 label {
   display: block;
   margin-bottom: 8px;

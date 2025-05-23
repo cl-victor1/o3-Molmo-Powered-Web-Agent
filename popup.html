@@ -19,6 +19,28 @@
       <div class="api-key-message" id="apiKeyMessage"></div>
     </div>
     
+    <div class="molmo-config-section" id="molmoConfigSection">
+      <h3>Molmo API Configuration</h3>
+      
+      <div class="api-type-selector">
+        <label for="molmoApiType">Molmo API Type:</label>
+        <select id="molmoApiType">
+          <option value="local">Local API (localhost:8000)</option>
+          <option value="official">Official API (ai2-reviz)</option>
+        </select>
+        <button id="saveMolmoApiType">Save</button>
+      </div>
+      
+      <div class="molmo-api-key-section" id="molmoApiKeySection" style="display: none;">
+        <label for="molmoApiKey">Molmo API Key:</label>
+        <div class="input-with-button">
+          <input type="password" id="molmoApiKey" placeholder="Enter your Molmo API key">
+          <button id="saveMolmoApiKey">Save</button>
+        </div>
+        <div class="api-key-message" id="molmoApiKeyMessage"></div>
+      </div>
+    </div>
+    
     <div class="command-section" id="commandSection">
       <label for="userCommand">What would you like me to do?</label>
       <textarea id="userCommand" placeholder="Type your command here... (e.g., 'Search for puppies on Google')"></textarea>

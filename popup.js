@@ -8,6 +8,14 @@ document.addEventListener('DOMContentLoaded', function() {
   const responseText = document.getElementById('responseText');
   const loadingSpinner = document.getElementById('loadingSpinner');
   
+  // Molmo API configuration DOM elements
+  const molmoApiTypeSelect = document.getElementById('molmoApiType');
+  const saveMolmoApiTypeButton = document.getElementById('saveMolmoApiType');
+  const molmoApiKeyInput = document.getElementById('molmoApiKey');
+  const saveMolmoApiKeyButton = document.getElementById('saveMolmoApiKey');
+  const molmoApiKeyMessage = document.getElementById('molmoApiKeyMessage');
+  const molmoApiKeySection = document.getElementById('molmoApiKeySection');
+  
   // Create status indicator for background tasks
   const statusContainer = document.createElement('div');
   statusContainer.className = 'status-container';
@@ -56,6 +64,72 @@ document.addEventListener('DOMContentLoaded', function() {
       apiKeyMessage.textContent = 'API key saved';
       apiKeyMessage.style.color = '#4CAF50';
     }
+  });
+  
+  // Load Molmo API configuration
+  chrome.runtime.sendMessage({ action: 'getMolmoApiType' }, function(response) {
+    if (response && response.apiType) {
+      molmoApiTypeSelect.value = response.apiType;
+      updateMolmoApiKeyVisibility(response.apiType);
+    }
+  });
+  
+  chrome.runtime.sendMessage({ action: 'getMolmoApiKeyStatus' }, function(response) {
+    if (response && response.hasApiKey) {
+      molmoApiKeyMessage.textContent = 'Molmo API key saved';
+      molmoApiKeyMessage.style.color = '#4CAF50';
+    }
+  });
+  
+  // Function to show/hide Molmo API key section based on selected type
+  function updateMolmoApiKeyVisibility(apiType) {
+    if (apiType === 'official') {
+      molmoApiKeySection.style.display = 'block';
+    } else {
+      molmoApiKeySection.style.display = 'none';
+    }
+  }
+  
+  // Molmo API type selection handler
+  molmoApiTypeSelect.addEventListener('change', function() {
+    updateMolmoApiKeyVisibility(molmoApiTypeSelect.value);
+  });
+  
+  // Save Molmo API type
+  saveMolmoApiTypeButton.addEventListener('click', function() {
+    const apiType = molmoApiTypeSelect.value;
+    
+    chrome.runtime.sendMessage({
+      action: 'setMolmoApiType',
+      apiType: apiType
+    }, function(response) {
+      if (response && response.success) {
+        console.log('Molmo API type saved:', apiType);
+        updateMolmoApiKeyVisibility(apiType);
+      }
+    });
+  });
+  
+  // Save Molmo API key
+  saveMolmoApiKeyButton.addEventListener('click', function() {
+    const apiKey = molmoApiKeyInput.value.trim();
+    
+    if (apiKey === '') {
+      molmoApiKeyMessage.textContent = 'Please enter a valid Molmo API key';
+      molmoApiKeyMessage.style.color = '#F44336';
+      return;
+    }
+    
+    chrome.runtime.sendMessage({
+      action: 'setMolmoApiKey',
+      apiKey: apiKey
+    }, function(response) {
+      if (response && response.success) {
+        molmoApiKeyMessage.textContent = 'Molmo API key saved';
+        molmoApiKeyMessage.style.color = '#4CAF50';
+        molmoApiKeyInput.value = ''; // Clear the input for security
+      }
+    });
   });
   
   // Load previous user command from storage
