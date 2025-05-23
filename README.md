@@ -6,6 +6,7 @@ AI-powered web browser automation using natural language commands with Molmo API
 
 - **Natural Language Commands**: Control your browser using simple English commands
 - **Visual Understanding**: Uses Molmo API to identify and interact with visual elements on web pages
+- **Dual Molmo API Support**: Choose between local API and official API
 - **YouTube Integration**: Specialized support for YouTube video interactions
 - **Auto-execution Mode**: AI can automatically complete entire tasks without manual intervention
 - **Conversation History**: Maintains context across multiple commands
@@ -14,17 +15,84 @@ AI-powered web browser automation using natural language commands with Molmo API
 
 1. Load the extension in Chrome Developer Mode
 2. Enter your OpenAI API key in the popup
-3. Configure the Molmo API URL in `background.js` (line 14)
+3. Configure your preferred Molmo API type (Local or Official)
+4. If using Official API, enter your Molmo API key
+
+## Molmo API Dual Implementation
+
+This extension supports two different ways to call the Molmo API:
+
+### 1. Local API
+- **URL**: `http://localhost:8000/molmo/point`
+- **Purpose**: Connect to Hyak Molmo service via SSH tunnel
+- **Advantages**: 
+  - No API key required
+  - Faster response
+  - Good for development and testing
+- **Disadvantages**: Requires local server setup
+
+### 2. Official API
+- **URL**: `https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream`
+- **Purpose**: Direct connection to AI2's official Molmo API
+- **Advantages**:
+  - No local server required
+  - Stable and reliable
+  - Supports streaming responses
+- **Disadvantages**: Requires API key
+
+## Configuration
+
+### Via Extension Popup:
+
+1. **Select API Type**:
+   - In the "Molmo API Configuration" section
+   - Choose "Local API" or "Official API" from dropdown
+   - Click "Save" to save settings
+
+2. **Configure Official API Key** (only when Official API is selected):
+   - After selecting "Official API", an API key input field will appear
+   - Enter your Molmo API key
+   - Click "Save" to save the key
+
+### Via Code Configuration:
+
+```javascript
+// In background.js, modify these constants:
+
+// Choose API type: 'local' or 'official'
+let MOLMO_API_TYPE = 'local';  // Change to 'official' for official API
+
+// Set official API key (only needed when using official API)
+let MOLMO_API_KEY = "your_api_key_here";
+```
+
+## API Response Format Differences
+
+### Local API Response Format:
+```json
+{
+  "points": [
+    {
+      "point": [x, y]
+    }
+  ]
+}
+```
+
+### Official API Response Format:
+Streaming response, one JSON object per line:
+```json
+{"result": {"output": {"text": "coordinate information in text"}}}
+```
 
 ## YouTube Video Commands
 
 The extension has specialized support for YouTube interactions. Here are some example commands:
 
 ### Opening Videos
-- **"Open the first video"** (Open the first video)
-- **"Click the first video"** (Click the first video)
-- **"Play the first video"** (Play the first video)
-- **"Open the first video"**
+- **"Open the first video"** 
+- **"Click the first video"** 
+- **"Play the first video"** 
 - **"Click on the second video"**
 - **"Play the video titled [specific title]"**
 
@@ -54,16 +122,25 @@ Click Execution: Mouse click at (320, 240)
 Result: First video opens
 ```
 
-## Configuration
+## Implementation Details
 
-### Molmo API Setup
-Update the `MOLMO_API_URL` in `background.js`:
-```javascript
-const MOLMO_API_URL = "http://your-molmo-server:8000/molmo/point";
-```
+The code automatically chooses the appropriate API based on `MOLMO_API_TYPE`:
 
-### OpenAI API Key
-Enter your API key in the extension popup or it will use the default key.
+- `callMolmoAPI()` - Main routing function that selects API based on configuration
+- `callMolmoLocalAPI()` - Calls the local API  
+- `callMolmoOfficialAPI()` - Calls the official API
+- `parseCoordinatesFromText()` - Parses coordinates from official API text responses
+
+## Error Handling
+
+Both APIs implement the same retry mechanism:
+- Maximum 3 retries
+- Exponential backoff algorithm
+- Detailed error logging
+
+## Switching API Types
+
+You can switch API types anytime in the extension popup without restarting the extension. Configuration is automatically saved to Chrome storage.
 
 ## Usage Tips
 
@@ -86,3 +163,5 @@ Enter your API key in the extension popup or it will use the default key.
 - **No coordinates returned**: Ensure the Molmo API is running and accessible
 - **Click not working**: Check if the page allows programmatic clicks
 - **API errors**: Verify your OpenAI API key and Molmo server status
+- **Local API connection issues**: Check if SSH tunnel is active and local server is running
+- **Official API errors**: Verify your Molmo API key is correct and valid
