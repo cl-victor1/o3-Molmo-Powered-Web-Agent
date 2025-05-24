@@ -81,6 +81,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
   
+  // Add debug status display
+  const debugContainer = document.createElement('div');
+  debugContainer.className = 'debug-container';
+  debugContainer.innerHTML = `
+    <div class="debug-info">
+      <strong>Debug Info:</strong>
+      <div id="currentApiType">Current API Type: Loading...</div>
+      <button id="refreshApiType" class="debug-button">Refresh API Type</button>
+    </div>
+  `;
+  molmoApiKeySection.parentNode.insertBefore(debugContainer, molmoApiKeySection.nextSibling);
+  
   // Function to show/hide Molmo API key section based on selected type
   function updateMolmoApiKeyVisibility(apiType) {
     if (apiType === 'official') {
@@ -93,6 +105,29 @@ document.addEventListener('DOMContentLoaded', function() {
   // Molmo API type selection handler
   molmoApiTypeSelect.addEventListener('change', function() {
     updateMolmoApiKeyVisibility(molmoApiTypeSelect.value);
+    // Automatically save when the selection changes
+    const apiType = molmoApiTypeSelect.value;
+    
+    chrome.runtime.sendMessage({
+      action: 'setMolmoApiType',
+      apiType: apiType
+    }, function(response) {
+      if (response && response.success) {
+        console.log('Molmo API type auto-saved:', apiType);
+        // Add visual feedback that it was saved
+        const typeLabel = document.querySelector('label[for="molmoApiType"]');
+        if (typeLabel) {
+          const originalText = typeLabel.textContent;
+          typeLabel.textContent = originalText + ' ✓ Saved';
+          typeLabel.style.color = '#4CAF50';
+          setTimeout(() => {
+            typeLabel.textContent = originalText;
+            typeLabel.style.color = '';
+          }, 2000);
+        }
+        updateMolmoApiKeyVisibility(apiType);
+      }
+    });
   });
   
   // Save Molmo API type
@@ -105,6 +140,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }, function(response) {
       if (response && response.success) {
         console.log('Molmo API type saved:', apiType);
+        // Add visual feedback
+        const button = saveMolmoApiTypeButton;
+        const originalText = button.textContent;
+        button.textContent = 'Saved!';
+        button.style.backgroundColor = '#4CAF50';
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.style.backgroundColor = '';
+        }, 2000);
         updateMolmoApiKeyVisibility(apiType);
       }
     });
@@ -412,4 +456,75 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   `;
   document.head.appendChild(style);
+
+  // Function to update debug display
+  function updateDebugDisplay() {
+    chrome.runtime.sendMessage({ action: 'getMolmoApiType' }, function(response) {
+      const display = document.getElementById('currentApiType');
+      if (response && response.apiType) {
+        display.textContent = `Current API Type: ${response.apiType}`;
+        display.style.color = response.apiType === 'official' ? '#4CAF50' : '#FF9800';
+      } else {
+        display.textContent = 'Current API Type: Not set (default: local)';
+        display.style.color = '#666';
+      }
+    });
+  }
+  
+  // Initial debug display update
+  updateDebugDisplay();
+  
+  // Refresh button event listener
+  document.getElementById('refreshApiType').addEventListener('click', updateDebugDisplay);
+
+  // Add CSS styles for the debug container
+  const debugStyle = document.createElement('style');
+  debugStyle.textContent = `
+    @keyframes pulse {
+      0% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+      100% {
+        opacity: 1;
+      }
+    }
+    
+    .debug-container {
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    
+    .debug-info {
+      margin-bottom: 5px;
+    }
+    
+    .debug-button {
+      padding: 4px 8px;
+      background-color: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 5px;
+    }
+    
+    .debug-button:hover {
+      background-color: #5a6268;
+    }
+    
+    #currentApiType {
+      margin: 5px 0;
+      font-family: monospace;
+      font-weight: bold;
+    }
+  `;
+  document.head.appendChild(debugStyle);
 }); 

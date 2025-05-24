@@ -13,7 +13,7 @@ let OPENAI_API_KEY = "";
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
 const MOLMO_OFFICIAL_API_URL = "https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream"; // Official Molmo API
-let MOLMO_API_KEY = ""; // Add your Molmo API key here
+let MOLMO_API_KEY = "OYJnOH/zlDPN0DLq"; // Add your Molmo API key here
 
 // Molmo API selection: 'local' or 'official'
 let MOLMO_API_TYPE = 'local'; // Change to 'official' to use the official API
@@ -516,6 +516,10 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
             const base64Image = dataUrl.split(',')[1];
             console.log('Screenshot captured successfully, size:', base64Image.length);
             
+            // Get viewport dimensions for coordinate denormalization
+            const viewportDimensions = await getViewportDimensions(tabId);
+            console.log('Viewport dimensions:', viewportDimensions);
+            
             // Format the object name as required by Molmo
             const formattedObjectName = `pointing: Point to ${action.object_name}`;
             
@@ -528,7 +532,25 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
             
             // Call Molmo API to get points
             console.log('About to call Molmo API...');
-            const points = await callMolmoAPI(base64Image, formattedObjectName);
+            const molmoResponse = await callMolmoAPI(base64Image, formattedObjectName);
+            console.log('=== MOLMO API RESPONSE DEBUG ===');
+            console.log('Raw Molmo response:', JSON.stringify(molmoResponse, null, 2));
+            console.log('Response type:', typeof molmoResponse);
+            console.log('Is array:', Array.isArray(molmoResponse));
+            console.log('Response length:', molmoResponse ? molmoResponse.length : 'null/undefined');
+            console.log('=== END MOLMO DEBUG ===');
+            
+            // Collect debug info to include in response
+            const debugInfo = {
+              molmoResponse: molmoResponse,
+              responseType: typeof molmoResponse,
+              isArray: Array.isArray(molmoResponse),
+              responseLength: molmoResponse ? molmoResponse.length : 'null/undefined',
+              apiType: MOLMO_API_TYPE,
+              objectName: action.object_name
+            };
+            
+            const points = molmoResponse;
             console.log('Molmo API call completed, received points:', points);
             
             if (points && points.length > 0) {
@@ -549,6 +571,16 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
                 clickY = parseFloat(point.y);
               } else {
                 throw new Error('Invalid point format from Molmo API');
+              }
+              
+              // Check if we're using the official API and need to denormalize coordinates
+              if (MOLMO_API_TYPE === 'official') {
+                console.log(`Original coordinates from official API: (${clickX}, ${clickY})`);
+                // Official API returns normalized coordinates that need to be denormalized
+                // Divide by 100, then multiply by actual image dimensions
+                clickX = (clickX / 100) * viewportDimensions.width;
+                clickY = (clickY / 100) * viewportDimensions.height;
+                console.log(`Denormalized coordinates: (${clickX}, ${clickY})`);
               }
               
               // Validate coordinates - ensure they are valid numbers
@@ -602,7 +634,8 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
               console.log('Wait complete');
             } else {
               console.error('No points returned from Molmo API');
-              throw new Error(`Failed to locate "${action.object_name}" on screen`);
+              const errorMsg = `Failed to locate "${action.object_name}" on screen. Debug info: ${JSON.stringify(debugInfo)}`;
+              throw new Error(errorMsg);
             }
           } catch (error) {
             console.error('Error with visual click action:', error);
@@ -929,6 +962,31 @@ async function captureScreenshot(tabId) {
   });
 }
 
+// Function to get viewport dimensions from the tab
+async function getViewportDimensions(tabId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      function: () => {
+        return {
+          width: window.innerWidth,
+          height: window.innerHeight
+        };
+      }
+    });
+    
+    if (result && result[0] && result[0].result) {
+      return result[0].result;
+    } else {
+      throw new Error('Failed to get viewport dimensions');
+    }
+  } catch (error) {
+    console.error('Error getting viewport dimensions:', error);
+    // Fallback to common screen dimensions
+    return { width: 1920, height: 1080 };
+  }
+}
+
 // Function to call Official Molmo API (based on test_molmo_api.py)
 async function callMolmoOfficialAPI(imageBase64, objectName) {
   const MAX_RETRIES = 3;
@@ -1019,10 +1077,18 @@ async function callMolmoOfficialAPI(imageBase64, objectName) {
       }
       
       console.log('Received full response from Official Molmo API:', responseText);
+      console.log('=== OFFICIAL MOLMO API DEBUG ===');
+      console.log('Raw response text length:', responseText.length);
+      console.log('Raw response text content:', responseText);
+      console.log('=== END OFFICIAL MOLMO DEBUG ===');
       
       // Parse coordinates from the response text
       // The response typically contains coordinate information
       const points = parseCoordinatesFromText(responseText);
+      console.log('=== COORDINATE PARSING DEBUG ===');
+      console.log('Parsed points from parseCoordinatesFromText:', JSON.stringify(points, null, 2));
+      console.log('Number of parsed points:', points ? points.length : 'null/undefined');
+      console.log('=== END COORDINATE PARSING DEBUG ===');
       
       if (points && points.length > 0) {
         console.log(`Official Molmo found ${points.length} points:`, points);
@@ -1070,6 +1136,7 @@ function parseCoordinatesFromText(text) {
     /\[(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\]/g, // [x, y] format
     /\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)/g, // (x, y) format
     /x[:\s]*(\d+(?:\.\d+)?)[,\s]+y[:\s]*(\d+(?:\.\d+)?)/gi, // x: 100, y: 200 format
+    /<point\s+x\s*=\s*["\']?(\d+(?:\.\d+)?)["\']?\s+y\s*=\s*["\']?(\d+(?:\.\d+)?)["\']?[^>]*>/gi, // <point x="56.5" y="95.5"> XML format
   ];
   
   for (const pattern of coordPatterns) {
@@ -1089,11 +1156,27 @@ function parseCoordinatesFromText(text) {
 
 // Function to call Molmo API (router that chooses between local and official APIs)
 async function callMolmoAPI(imageBase64, objectName) {
+  // Force reload the latest configuration from storage before making API call
+  await new Promise((resolve) => {
+    chrome.storage.sync.get(['molmo_api_type'], function(result) {
+      if (result.molmo_api_type) {
+        MOLMO_API_TYPE = result.molmo_api_type;
+        console.log('Reloaded Molmo API type from storage:', MOLMO_API_TYPE);
+      } else {
+        console.log('No molmo_api_type found in storage, using default:', MOLMO_API_TYPE);
+      }
+      resolve();
+    });
+  });
+  
   console.log(`Using Molmo API type: ${MOLMO_API_TYPE}`);
+  console.log(`Comparison check - is '${MOLMO_API_TYPE}' === 'official'?`, MOLMO_API_TYPE === 'official');
   
   if (MOLMO_API_TYPE === 'official') {
+    console.log('Calling Official Molmo API');
     return await callMolmoOfficialAPI(imageBase64, objectName);
   } else {
+    console.log('Calling Local Molmo API');
     return await callMolmoLocalAPI(imageBase64, objectName);
   }
 }
@@ -1152,6 +1235,16 @@ async function callMolmoLocalAPI(imageBase64, objectName) {
       // Parse the response
       const result = await response.json();
       console.log('Received response from Molmo API:', result);
+      console.log('=== LOCAL MOLMO API DEBUG ===');
+      console.log('Full response structure:', JSON.stringify(result, null, 2));
+      console.log('Response has error:', !!result.error);
+      console.log('Response has points:', !!result.points);
+      console.log('Points is array:', Array.isArray(result.points));
+      console.log('Points length:', result.points ? result.points.length : 'null/undefined');
+      if (result.points) {
+        console.log('Raw points data:', JSON.stringify(result.points, null, 2));
+      }
+      console.log('=== END LOCAL MOLMO DEBUG ===');
       
       // Check for errors
       if (result.error) {
