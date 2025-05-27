@@ -7,8 +7,11 @@ const tabContext = new Map();
 // Map to track ongoing task executions
 const taskExecutions = new Map();
 
-// API Keys
-let OPENAI_API_KEY = "";
+// Azure OpenAI API Configuration
+const AZURE_OPENAI_ENDPOINT = "https://ai-olmohub1163464654570.openai.azure.com/";
+const AZURE_OPENAI_API_KEY = "B5XSjzTCDdRyQHyLEa33rJ75cH1V7JNXVjggUwFm9BSvJUEB1bSbJQQJ99BDACHYHv6XJ3w3AAAAACOGzq3i";
+const AZURE_OPENAI_API_VERSION = "2024-12-01-preview";
+const AZURE_OPENAI_DEPLOYMENT = "o3-standard"; // Using o3 model as specified in the original code
 
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
@@ -18,12 +21,8 @@ let MOLMO_API_KEY = "OYJnOH/zlDPN0DLq"; // Add your Molmo API key here
 // Molmo API selection: 'local' or 'official'
 let MOLMO_API_TYPE = 'local'; // Change to 'official' to use the official API
 
-// Load saved API keys and configuration on startup
-chrome.storage.sync.get(['openai_api_key', 'molmo_api_key', 'molmo_api_type'], function(result) {
-  if (result.openai_api_key) {
-    OPENAI_API_KEY = result.openai_api_key;
-    console.log('Loaded OpenAI API key from storage');
-  }
+// Load saved configuration on startup (keeping Molmo settings)
+chrome.storage.sync.get(['molmo_api_key', 'molmo_api_type'], function(result) {
   if (result.molmo_api_key) {
     MOLMO_API_KEY = result.molmo_api_key;
     console.log('Loaded Molmo API key from storage');
@@ -194,12 +193,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'setApiKey') {
     const { apiKey } = request;
     
-    // Store API key in Chrome storage
-    chrome.storage.sync.set({ 'openai_api_key': apiKey }, function() {
-      OPENAI_API_KEY = apiKey;
-      console.log('OpenAI API key saved to storage');
-      sendResponse({ success: true });
-    });
+    // Since we're using hardcoded Azure credentials, just acknowledge the request
+    console.log('API key setting ignored - using hardcoded Azure credentials');
+    sendResponse({ success: true });
     
     return true;
   }
@@ -207,8 +203,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   // Handle getting API key status
   if (request.action === 'getApiKeyStatus') {
     sendResponse({ 
-      hasApiKey: !!OPENAI_API_KEY,
-      apiKeySet: !!OPENAI_API_KEY
+      hasApiKey: !!AZURE_OPENAI_API_KEY,
+      apiKeySet: !!AZURE_OPENAI_API_KEY
     });
     return true;
   }
@@ -327,20 +323,19 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
     }
     
     // Check if we have an API key
-    const finalApiKey = apiKey || OPENAI_API_KEY;
+    const finalApiKey = apiKey || AZURE_OPENAI_API_KEY;
     if (!finalApiKey) {
-      throw new Error('No OpenAI API key available. Please set your API key in the extension popup.');
+      throw new Error('No Azure OpenAI API key available. Azure credentials are hardcoded in the extension.');
     }
     
     // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${finalApiKey}`
+        'api-key': finalApiKey
       },
       body: JSON.stringify({
-        model: 'o3',
         messages: [
           {
             role: 'system',
@@ -846,18 +841,17 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
     });
     
     // Call OpenAI API to analyze task completion
-    if (!OPENAI_API_KEY) {
-      throw new Error('No OpenAI API key available for task analysis.');
+    if (!AZURE_OPENAI_API_KEY) {
+      throw new Error('No Azure OpenAI API key available for task analysis.');
     }
     
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'api-key': AZURE_OPENAI_API_KEY
       },
       body: JSON.stringify({
-        model: 'o3',
         messages: [
           {
             role: 'system',
