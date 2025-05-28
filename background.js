@@ -324,7 +324,7 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
-                      {"action": "scroll", "direction": "down", "amount": 300}
+                      {"action": "scroll", "direction": "down", "amount": 400}
                       
                       For the "click" action, you can use either:
                       1. CSS selector: {"action": "click", "selector": "button.submit-btn"}
@@ -334,10 +334,17 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       This uses the Molmo API to identify objects visually even without precise selectors.
                       
                       IMPORTANT SCROLLING GUIDELINES:
-                      - Avoid large scrolling actions before visual clicks (object_name)
-                      - Only use small scroll amounts (100-300 pixels) when absolutely necessary
-                      - Prefer trying visual clicks on current viewport first
-                      - If an element is not visible, try a small scroll and then attempt the visual click
+                      - The visual click system (object_name) automatically handles scrolling when elements are not found
+                      - When using object_name clicks, the system will automatically scroll down multiple times to find the target
+                      - You should focus on providing clear, descriptive object names rather than manual scrolling
+                      - Only use manual scroll actions when you specifically need to navigate to a different part of the page
+                      - For manual scrolling, use moderate amounts (200-400 pixels) to avoid overshooting
+                      
+                      VISUAL CLICK STRATEGY:
+                      - The system will first try to find the element in the current viewport
+                      - If not found, it will automatically scroll down in 300px increments up to 3 times
+                      - If still not found, it will scroll back up to check if the element was above the original position
+                      - This means you can confidently use object_name clicks without worrying about scrolling
                       
                       IMPORTANT: For YouTube videos, use specific descriptions like:
                       - "first video" or "first video thumbnail" for the first video in the list
@@ -528,41 +535,91 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
             let points = molmoResponse;
             console.log('Molmo API call completed, received points:', points);
             
-            // If no points found, try a small scroll and retry once
+            // If no points found, try scrolling and retrying multiple times
             if (!points || points.length === 0) {
-              console.log('No points found in initial screenshot, trying small scroll down and retry...');
+              console.log('No points found in initial screenshot, trying multiple scroll attempts...');
               
-              // Perform a small scroll down (200 pixels)
-              await chrome.scripting.executeScript({
-                target: { tabId },
-                function: () => {
-                  window.scrollBy(0, 200);
-                  return 'Scrolled down 200px';
-                }
-              });
+              const MAX_SCROLL_ATTEMPTS = 20;
+              let scrollAttempt = 0;
               
-              // Wait for scroll to complete
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              
-              // Capture new screenshot
-              console.log('Capturing screenshot after small scroll...');
-              const newDataUrl = await captureScreenshot(tabId);
-              const newBase64Image = newDataUrl.split(',')[1];
-              
-              // Try Molmo API again
-              console.log('Retrying Molmo API after scroll...');
-              const retryMolmoResponse = await callMolmoAPI(newBase64Image, formattedObjectName);
-              
-              if (retryMolmoResponse && retryMolmoResponse.length > 0) {
-                console.log('Found points after scroll:', retryMolmoResponse);
-                // Use the retry response
-                Object.assign(debugInfo, {
-                  retryAfterScroll: true,
-                  retryMolmoResponse: retryMolmoResponse
+              while (scrollAttempt < MAX_SCROLL_ATTEMPTS && (!points || points.length === 0)) {
+                scrollAttempt++;
+                console.log(`Scroll attempt ${scrollAttempt}/${MAX_SCROLL_ATTEMPTS}: scrolling down to find "${action.object_name}"`);
+                
+                // Perform a scroll down (300 pixels each time)
+                await chrome.scripting.executeScript({
+                  target: { tabId },
+                  function: () => {
+                    window.scrollBy(0, 300);
+                    return `Scrolled down 300px (attempt ${arguments[0]})`;
+                  },
+                  args: [scrollAttempt]
                 });
-                points = retryMolmoResponse;
-              } else {
-                console.log('Still no points found after scroll');
+                
+                // Wait for scroll to complete and page to settle
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Capture new screenshot
+                console.log(`Capturing screenshot after scroll attempt ${scrollAttempt}...`);
+                const newDataUrl = await captureScreenshot(tabId);
+                const newBase64Image = newDataUrl.split(',')[1];
+                
+                // Try Molmo API again
+                console.log(`Retrying Molmo API after scroll attempt ${scrollAttempt}...`);
+                const retryMolmoResponse = await callMolmoAPI(newBase64Image, formattedObjectName);
+                
+                if (retryMolmoResponse && retryMolmoResponse.length > 0) {
+                  console.log(`Found points after scroll attempt ${scrollAttempt}:`, retryMolmoResponse);
+                  // Use the retry response
+                  Object.assign(debugInfo, {
+                    retryAfterScroll: true,
+                    scrollAttempts: scrollAttempt,
+                    retryMolmoResponse: retryMolmoResponse
+                  });
+                  points = retryMolmoResponse;
+                  break; // Exit the loop since we found points
+                } else {
+                  console.log(`Still no points found after scroll attempt ${scrollAttempt}`);
+                }
+              }
+              
+              // If still no points found after all scroll attempts, try scrolling up to check if we went too far
+              if (!points || points.length === 0) {
+                console.log('No points found after scrolling down, trying to scroll back up...');
+                
+                // Scroll back up to original position plus a bit more
+                await chrome.scripting.executeScript({
+                  target: { tabId },
+                  function: () => {
+                    window.scrollBy(0, -(300 * arguments[0] + 200)); // Scroll back up past original position
+                    return `Scrolled back up ${300 * arguments[0] + 200}px`;
+                  },
+                  args: [scrollAttempt]
+                });
+                
+                // Wait for scroll to complete
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Try one more time
+                console.log('Capturing screenshot after scrolling back up...');
+                const finalDataUrl = await captureScreenshot(tabId);
+                const finalBase64Image = finalDataUrl.split(',')[1];
+                
+                console.log('Final retry of Molmo API after scrolling back up...');
+                const finalMolmoResponse = await callMolmoAPI(finalBase64Image, formattedObjectName);
+                
+                if (finalMolmoResponse && finalMolmoResponse.length > 0) {
+                  console.log('Found points after scrolling back up:', finalMolmoResponse);
+                  Object.assign(debugInfo, {
+                    retryAfterScroll: true,
+                    scrollAttempts: scrollAttempt,
+                    finalRetryAfterScrollUp: true,
+                    finalMolmoResponse: finalMolmoResponse
+                  });
+                  points = finalMolmoResponse;
+                } else {
+                  console.log('Still no points found after scrolling back up');
+                }
               }
             }
             
@@ -882,10 +939,17 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
                       consider the task completed rather than continuing indefinitely.
                       
                       IMPORTANT SCROLLING GUIDELINES:
-                      - Avoid large scrolling actions before visual clicks (object_name)
-                      - Only use small scroll amounts (100-300 pixels) when absolutely necessary
-                      - Prefer trying visual clicks on current viewport first
-                      - If an element is not visible, try a small scroll and then attempt the visual click
+                      - The visual click system (object_name) automatically handles scrolling when elements are not found
+                      - When using object_name clicks, the system will automatically scroll down multiple times to find the target
+                      - You should focus on providing clear, descriptive object names rather than manual scrolling
+                      - Only use manual scroll actions when you specifically need to navigate to a different part of the page
+                      - For manual scrolling, use moderate amounts (200-400 pixels) to avoid overshooting
+                      
+                      VISUAL CLICK STRATEGY:
+                      - The system will first try to find the element in the current viewport
+                      - If not found, it will automatically scroll down in 300px increments up to 3 times
+                      - If still not found, it will scroll back up to check if the element was above the original position
+                      - This means you can confidently use object_name clicks without worrying about scrolling
                       
                       Use the following action formats:
                       {"action": "click", "selector": "button.submit-btn"}
@@ -893,7 +957,7 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
-                      {"action": "scroll", "direction": "down", "amount": 300}
+                      {"action": "scroll", "direction": "down", "amount": 400}
                       {"action": "click", "object_name": "search button"}`
           },
           ...conversationHistory
@@ -1007,7 +1071,7 @@ async function getViewportDimensions(tabId) {
 
 // Function to call Official Molmo API (based on test_molmo_api.py)
 async function callMolmoOfficialAPI(imageBase64, objectName) {
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 2;
   let retryCount = 0;
   
   while (retryCount < MAX_RETRIES) {
@@ -1048,7 +1112,7 @@ async function callMolmoOfficialAPI(imageBase64, objectName) {
         // Increase retry count and try again after delay
         retryCount++;
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 * retryCount; // Exponential backoff
+          const delay = 1000 * retryCount; // Exponential backoff
           console.log(`Will retry in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1112,7 +1176,7 @@ async function callMolmoOfficialAPI(imageBase64, objectName) {
         // Increase retry count and try again after delay
         retryCount++;
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 * retryCount; // Exponential backoff
+          const delay = 1000 * retryCount; // Exponential backoff
           console.log(`Will retry in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1125,7 +1189,7 @@ async function callMolmoOfficialAPI(imageBase64, objectName) {
       // Increase retry count and try again after delay
       retryCount++;
       if (retryCount < MAX_RETRIES) {
-        const delay = 2000 * retryCount; // Exponential backoff
+        const delay = 1000 * retryCount; // Exponential backoff
         console.log(`Will retry in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
@@ -1237,7 +1301,7 @@ async function callMolmoLocalAPI(imageBase64, objectName) {
         // Increase retry count and try again after delay
         retryCount++;
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 * retryCount; // Exponential backoff
+          const delay = 1000 * retryCount; // Exponential backoff
           console.log(`Will retry in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1266,7 +1330,7 @@ async function callMolmoLocalAPI(imageBase64, objectName) {
         // Increase retry count and try again after delay
         retryCount++;
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 * retryCount; // Exponential backoff
+          const delay = 1000 * retryCount; // Exponential backoff
           console.log(`Will retry in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1311,7 +1375,7 @@ async function callMolmoLocalAPI(imageBase64, objectName) {
         // Increase retry count and try again after delay
         retryCount++;
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 * retryCount; // Exponential backoff
+          const delay = 1000 * retryCount; // Exponential backoff
           console.log(`Will retry in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1324,7 +1388,7 @@ async function callMolmoLocalAPI(imageBase64, objectName) {
       // Increase retry count and try again after delay
       retryCount++;
       if (retryCount < MAX_RETRIES) {
-        const delay = 2000 * retryCount; // Exponential backoff
+        const delay = 1000 * retryCount; // Exponential backoff
         console.log(`Will retry in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
