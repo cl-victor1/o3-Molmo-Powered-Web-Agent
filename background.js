@@ -324,7 +324,7 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
-                      {"action": "scroll", "direction": "down", "amount": 500}
+                      {"action": "scroll", "direction": "down", "amount": 300}
                       
                       For the "click" action, you can use either:
                       1. CSS selector: {"action": "click", "selector": "button.submit-btn"}
@@ -332,6 +332,12 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       
                       When using object_name, provide a clear description of what to click on the screen. 
                       This uses the Molmo API to identify objects visually even without precise selectors.
+                      
+                      IMPORTANT SCROLLING GUIDELINES:
+                      - Avoid large scrolling actions before visual clicks (object_name)
+                      - Only use small scroll amounts (100-300 pixels) when absolutely necessary
+                      - Prefer trying visual clicks on current viewport first
+                      - If an element is not visible, try a small scroll and then attempt the visual click
                       
                       IMPORTANT: For YouTube videos, use specific descriptions like:
                       - "first video" or "first video thumbnail" for the first video in the list
@@ -519,8 +525,46 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
               objectName: action.object_name
             };
             
-            const points = molmoResponse;
+            let points = molmoResponse;
             console.log('Molmo API call completed, received points:', points);
+            
+            // If no points found, try a small scroll and retry once
+            if (!points || points.length === 0) {
+              console.log('No points found in initial screenshot, trying small scroll down and retry...');
+              
+              // Perform a small scroll down (200 pixels)
+              await chrome.scripting.executeScript({
+                target: { tabId },
+                function: () => {
+                  window.scrollBy(0, 200);
+                  return 'Scrolled down 200px';
+                }
+              });
+              
+              // Wait for scroll to complete
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Capture new screenshot
+              console.log('Capturing screenshot after small scroll...');
+              const newDataUrl = await captureScreenshot(tabId);
+              const newBase64Image = newDataUrl.split(',')[1];
+              
+              // Try Molmo API again
+              console.log('Retrying Molmo API after scroll...');
+              const retryMolmoResponse = await callMolmoAPI(newBase64Image, formattedObjectName);
+              
+              if (retryMolmoResponse && retryMolmoResponse.length > 0) {
+                console.log('Found points after scroll:', retryMolmoResponse);
+                // Use the retry response
+                Object.assign(debugInfo, {
+                  retryAfterScroll: true,
+                  retryMolmoResponse: retryMolmoResponse
+                });
+                points = retryMolmoResponse;
+              } else {
+                console.log('Still no points found after scroll');
+              }
+            }
             
             if (points && points.length > 0) {
               // Use the first point returned by Molmo
@@ -765,7 +809,7 @@ async function executeActionsInTabWithDepth(tabId, actions, recursionDepth = 0) 
 
 // Function to analyze the current page and determine if task is complete
 async function analyzePageAndContinue(tabId, recursionDepth = 0) {
-  const MAX_RECURSION_DEPTH = 3; // Prevent infinite loops
+  const MAX_RECURSION_DEPTH = 10; // Prevent infinite loops
   
   try {
     // Check if task has been stopped
@@ -837,13 +881,19 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
                       IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
                       consider the task completed rather than continuing indefinitely.
                       
+                      IMPORTANT SCROLLING GUIDELINES:
+                      - Avoid large scrolling actions before visual clicks (object_name)
+                      - Only use small scroll amounts (100-300 pixels) when absolutely necessary
+                      - Prefer trying visual clicks on current viewport first
+                      - If an element is not visible, try a small scroll and then attempt the visual click
+                      
                       Use the following action formats:
                       {"action": "click", "selector": "button.submit-btn"}
                       {"action": "type", "selector": "input#search", "text": "search query"}
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
-                      {"action": "scroll", "direction": "down", "amount": 500}
+                      {"action": "scroll", "direction": "down", "amount": 300}
                       {"action": "click", "object_name": "search button"}`
           },
           ...conversationHistory

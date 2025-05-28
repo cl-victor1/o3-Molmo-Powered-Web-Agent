@@ -94,11 +94,29 @@ function findElement(selector) {
 async function clickElement(selector) {
   const element = findElement(selector);
   
-  // Scroll element into view
-  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Check if element is already visible in viewport before scrolling
+  const rect = element.getBoundingClientRect();
+  const isVisible = (
+    rect.top >= 0 &&
+    rect.left >= 0 &&
+    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+  );
   
-  // Wait a moment for the scroll to complete
-  await wait(500);
+  // Only scroll if element is completely out of view, and use minimal scrolling
+  if (!isVisible) {
+    // Check if element is above or below viewport
+    if (rect.top < 0) {
+      // Element is above viewport, scroll up minimally
+      window.scrollBy(0, rect.top - 50); // Small buffer from top
+    } else if (rect.bottom > window.innerHeight) {
+      // Element is below viewport, scroll down minimally
+      window.scrollBy(0, rect.bottom - window.innerHeight + 50); // Small buffer from bottom
+    }
+    
+    // Wait a moment for the minimal scroll to complete
+    await wait(300);
+  }
   
   // Highlight element before clicking
   const originalBackgroundColor = element.style.backgroundColor;
