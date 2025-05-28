@@ -11,10 +11,6 @@ document.addEventListener('DOMContentLoaded', function() {
   // Molmo API configuration DOM elements
   const molmoApiTypeSelect = document.getElementById('molmoApiType');
   const saveMolmoApiTypeButton = document.getElementById('saveMolmoApiType');
-  const molmoApiKeyInput = document.getElementById('molmoApiKey');
-  const saveMolmoApiKeyButton = document.getElementById('saveMolmoApiKey');
-  const molmoApiKeyMessage = document.getElementById('molmoApiKeyMessage');
-  const molmoApiKeySection = document.getElementById('molmoApiKeySection');
   
   // Create status indicator for background tasks
   const statusContainer = document.createElement('div');
@@ -70,14 +66,6 @@ document.addEventListener('DOMContentLoaded', function() {
   chrome.runtime.sendMessage({ action: 'getMolmoApiType' }, function(response) {
     if (response && response.apiType) {
       molmoApiTypeSelect.value = response.apiType;
-      updateMolmoApiKeyVisibility(response.apiType);
-    }
-  });
-  
-  chrome.runtime.sendMessage({ action: 'getMolmoApiKeyStatus' }, function(response) {
-    if (response && response.hasApiKey) {
-      molmoApiKeyMessage.textContent = 'Molmo API key saved';
-      molmoApiKeyMessage.style.color = '#4CAF50';
     }
   });
   
@@ -91,20 +79,10 @@ document.addEventListener('DOMContentLoaded', function() {
       <button id="refreshApiType" class="debug-button">Refresh API Type</button>
     </div>
   `;
-  molmoApiKeySection.parentNode.insertBefore(debugContainer, molmoApiKeySection.nextSibling);
-  
-  // Function to show/hide Molmo API key section based on selected type
-  function updateMolmoApiKeyVisibility(apiType) {
-    if (apiType === 'official') {
-      molmoApiKeySection.style.display = 'block';
-    } else {
-      molmoApiKeySection.style.display = 'none';
-    }
-  }
+  document.getElementById('molmoConfigSection').appendChild(debugContainer);
   
   // Molmo API type selection handler
   molmoApiTypeSelect.addEventListener('change', function() {
-    updateMolmoApiKeyVisibility(molmoApiTypeSelect.value);
     // Automatically save when the selection changes
     const apiType = molmoApiTypeSelect.value;
     
@@ -125,7 +103,6 @@ document.addEventListener('DOMContentLoaded', function() {
             typeLabel.style.color = '';
           }, 2000);
         }
-        updateMolmoApiKeyVisibility(apiType);
       }
     });
   });
@@ -149,29 +126,6 @@ document.addEventListener('DOMContentLoaded', function() {
           button.textContent = originalText;
           button.style.backgroundColor = '';
         }, 2000);
-        updateMolmoApiKeyVisibility(apiType);
-      }
-    });
-  });
-  
-  // Save Molmo API key
-  saveMolmoApiKeyButton.addEventListener('click', function() {
-    const apiKey = molmoApiKeyInput.value.trim();
-    
-    if (apiKey === '') {
-      molmoApiKeyMessage.textContent = 'Please enter a valid Molmo API key';
-      molmoApiKeyMessage.style.color = '#F44336';
-      return;
-    }
-    
-    chrome.runtime.sendMessage({
-      action: 'setMolmoApiKey',
-      apiKey: apiKey
-    }, function(response) {
-      if (response && response.success) {
-        molmoApiKeyMessage.textContent = 'Molmo API key saved';
-        molmoApiKeyMessage.style.color = '#4CAF50';
-        molmoApiKeyInput.value = ''; // Clear the input for security
       }
     });
   });

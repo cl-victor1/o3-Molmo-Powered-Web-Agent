@@ -16,7 +16,6 @@ AI-powered web browser automation using natural language commands with Molmo API
 1. Load the extension in Chrome Developer Mode
 2. Enter your OpenAI API key in the popup
 3. Configure your preferred Molmo API type (Local or Official)
-4. If using Official API, enter your Molmo API key
 
 ## Molmo API Dual Implementation
 
@@ -26,7 +25,6 @@ This extension supports two different ways to call the Molmo API:
 - **URL**: `http://localhost:8000/molmo/point`
 - **Purpose**: Connect to Hyak Molmo service via SSH tunnel
 - **Advantages**: 
-  - No API key required
   - Faster response
   - Good for development and testing
 - **Disadvantages**: Requires local server setup
@@ -38,7 +36,7 @@ This extension supports two different ways to call the Molmo API:
   - No local server required
   - Stable and reliable
   - Supports streaming responses
-- **Disadvantages**: Requires API key
+- **Disadvantages**: None (API key is hardcoded in extension)
 
 ## Configuration
 
@@ -49,11 +47,6 @@ This extension supports two different ways to call the Molmo API:
    - Choose "Local API" or "Official API" from dropdown
    - Click "Save" to save settings
 
-2. **Configure Official API Key** (only when Official API is selected):
-   - After selecting "Official API", an API key input field will appear
-   - Enter your Molmo API key
-   - Click "Save" to save the key
-
 ### Via Code Configuration:
 
 ```javascript
@@ -62,8 +55,8 @@ This extension supports two different ways to call the Molmo API:
 // Choose API type: 'local' or 'official'
 let MOLMO_API_TYPE = 'local';  // Change to 'official' for official API
 
-// Set official API key (only needed when using official API)
-let MOLMO_API_KEY = "your_api_key_here";
+// Official API key is hardcoded in the extension
+const MOLMO_API_KEY = "OYJnOH/zlDPN0DLq";
 ```
 
 ## API Response Format Differences
@@ -164,4 +157,4 @@ You can switch API types anytime in the extension popup without restarting the e
 - **Click not working**: Check if the page allows programmatic clicks
 - **API errors**: Verify your OpenAI API key and Molmo server status
 - **Local API connection issues**: Check if SSH tunnel is active and local server is running
-- **Official API errors**: Verify your Molmo API key is correct and valid
+- **Official API errors**: Check console logs for detailed error information

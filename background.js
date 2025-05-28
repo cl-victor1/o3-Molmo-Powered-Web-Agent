@@ -16,17 +16,13 @@ const AZURE_OPENAI_DEPLOYMENT = "o3-standard"; // Using o3 model as specified in
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
 const MOLMO_OFFICIAL_API_URL = "https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream"; // Official Molmo API
-let MOLMO_API_KEY = "OYJnOH/zlDPN0DLq"; // Add your Molmo API key here
+const MOLMO_API_KEY = "OYJnOH/zlDPN0DLq"; // Hardcoded Molmo API key
 
 // Molmo API selection: 'local' or 'official'
-let MOLMO_API_TYPE = 'local'; // Change to 'official' to use the official API
+let MOLMO_API_TYPE = 'official'; // Change to 'official' to use the official API
 
-// Load saved configuration on startup (keeping Molmo settings)
-chrome.storage.sync.get(['molmo_api_key', 'molmo_api_type'], function(result) {
-  if (result.molmo_api_key) {
-    MOLMO_API_KEY = result.molmo_api_key;
-    console.log('Loaded Molmo API key from storage');
-  }
+// Load saved configuration on startup (only for API type)
+chrome.storage.sync.get(['molmo_api_type'], function(result) {
   if (result.molmo_api_type) {
     MOLMO_API_TYPE = result.molmo_api_type;
     console.log('Loaded Molmo API type from storage:', MOLMO_API_TYPE);
@@ -209,29 +205,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
   }
   
-  // Handle setting Molmo API key
-  if (request.action === 'setMolmoApiKey') {
-    const { apiKey } = request;
-    
-    // Store Molmo API key in Chrome storage
-    chrome.storage.sync.set({ 'molmo_api_key': apiKey }, function() {
-      MOLMO_API_KEY = apiKey;
-      console.log('Molmo API key saved to storage');
-      sendResponse({ success: true });
-    });
-    
-    return true;
-  }
-  
-  // Handle getting Molmo API key status
-  if (request.action === 'getMolmoApiKeyStatus') {
-    sendResponse({ 
-      hasApiKey: !!MOLMO_API_KEY,
-      apiKeySet: !!MOLMO_API_KEY
-    });
-    return true;
-  }
-  
   // Handle setting Molmo API type
   if (request.action === 'setMolmoApiType') {
     const { apiType } = request;
@@ -323,7 +296,8 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
     }
     
     // Check if we have an API key
-    const finalApiKey = apiKey || AZURE_OPENAI_API_KEY;
+    //const finalApiKey = apiKey || AZURE_OPENAI_API_KEY;
+    const finalApiKey =  AZURE_OPENAI_API_KEY; // use Azure for now
     if (!finalApiKey) {
       throw new Error('No Azure OpenAI API key available. Azure credentials are hardcoded in the extension.');
     }
@@ -985,11 +959,6 @@ async function getViewportDimensions(tabId) {
 async function callMolmoOfficialAPI(imageBase64, objectName) {
   const MAX_RETRIES = 3;
   let retryCount = 0;
-  
-  // Check if we have the API key
-  if (!MOLMO_API_KEY) {
-    throw new Error('No Molmo API key available. Please set your Molmo API key in the extension.');
-  }
   
   while (retryCount < MAX_RETRIES) {
     try {

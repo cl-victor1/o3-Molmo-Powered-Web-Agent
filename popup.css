@@ -67,17 +67,6 @@ h2 {
   font-size: 14px;
 }
 
-.molmo-api-key-section {
-  margin-top: 15px;
-  padding-top: 15px;
-  border-top: 1px solid #e1e4e8;
-}
-
-.molmo-api-key-section label {
-  color: #444;
-  font-size: 14px;
-}
-
 label {
   display: block;
   margin-bottom: 8px;
