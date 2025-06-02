@@ -7,14 +7,11 @@ const tabContext = new Map();
 // Map to track ongoing task executions
 const taskExecutions = new Map();
 
-// Azure OpenAI API Configuration
-const AZURE_OPENAI_ENDPOINT = "https://ai-olmohub1163464654570.openai.azure.com/";
-const AZURE_OPENAI_API_KEY = "B5XSjzTCDdRyQHyLEa33rJ75cH1V7JNXVjggUwFm9BSvJUEB1bSbJQQJ99BDACHYHv6XJ3w3AAAAACOGzq3i";
-const AZURE_OPENAI_API_VERSION = "2024-12-01-preview";
-const AZURE_OPENAI_DEPLOYMENT = "o3-standard"; // Using o3 model as specified in the original code
-
-// GPT-4.1 Configuration for enhanced NLP tasks
-const GPT41_DEPLOYMENT = "gpt-4.1-standard"; // GPT-4.1 model for text analysis and understanding
+// Regular OpenAI API Configuration
+const OPENAI_API_ENDPOINT = "https://api.openai.com/v1";
+const OPENAI_API_KEY = "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"; // Set your OpenAI API key here
+const OPENAI_MODEL = "o3"; // Using o3-mini model (same as Azure deployment)
+const GPT41_MODEL = "gpt-4.1"; // GPT-4 Turbo for text analysis and understanding
 
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
@@ -192,8 +189,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'setApiKey') {
     const { apiKey } = request;
     
-    // Since we're using hardcoded Azure credentials, just acknowledge the request
-    console.log('API key setting ignored - using hardcoded Azure credentials');
+    // Since we're using hardcoded OpenAI credentials, just acknowledge the request
+    console.log('API key setting ignored - using hardcoded OpenAI credentials');
     sendResponse({ success: true });
     
     return true;
@@ -202,8 +199,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   // Handle getting API key status
   if (request.action === 'getApiKeyStatus') {
     sendResponse({ 
-      hasApiKey: !!AZURE_OPENAI_API_KEY,
-      apiKeySet: !!AZURE_OPENAI_API_KEY
+      hasApiKey: !!OPENAI_API_KEY,
+      apiKeySet: !!OPENAI_API_KEY
     });
     return true;
   }
@@ -494,20 +491,21 @@ User command: ${command}`;
     }
     
     // Check if we have an API key
-    const finalApiKey =  AZURE_OPENAI_API_KEY; // use Azure for now
+    const finalApiKey =  OPENAI_API_KEY; // use OpenAI for now
     if (!finalApiKey) {
-      throw new Error('No Azure OpenAI API key available. Azure credentials are hardcoded in the extension.');
+      throw new Error('No OpenAI API key available. OpenAI credentials are hardcoded in the extension.');
     }
     
     // Step 4: Call O3 model for action generation with enhanced context
     console.log('Calling O3 model for action generation...');
-    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': finalApiKey
+        'Authorization': `Bearer ${finalApiKey}`
       },
       body: JSON.stringify({
+        model: OPENAI_MODEL,
         messages: [
           {
             role: 'system',
@@ -1172,13 +1170,14 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
         
         userPrompt += '\n\nPlease analyze if the task has been completed and provide structured insights.';
         
-        const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+        const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'api-key': AZURE_OPENAI_API_KEY
+            'Authorization': `Bearer ${OPENAI_API_KEY}`
           },
           body: JSON.stringify({
+            model: GPT41_MODEL,
             messages: [
               {
                 role: 'system',
@@ -1247,17 +1246,18 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
     });
     
     // Call O3 API to analyze task completion
-    if (!AZURE_OPENAI_API_KEY) {
-      throw new Error('No Azure OpenAI API key available for task analysis.');
+    if (!OPENAI_API_KEY) {
+      throw new Error('No OpenAI API key available for task analysis.');
     }
     
-    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
+        model: OPENAI_MODEL,
         messages: [
           {
             role: 'system',
@@ -2168,13 +2168,14 @@ async function analyzePageContentWithGPT41(enhancedContent, userCommand, analysi
                       Please analyze this webpage content and provide insights relevant to the user's task.`;
     }
     
-    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
+        model: GPT41_MODEL,
         messages: [
           {
             role: 'system',
@@ -2236,13 +2237,14 @@ async function analyzeTaskRequirements(userCommand, pageContent) {
                         
                         Please analyze this task and provide structured insights.`;
     
-    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
+        model: GPT41_MODEL,
         messages: [
           {
             role: 'system',
@@ -2311,13 +2313,14 @@ async function extractSpecificInformation(pageContent, extractionTarget, context
                         
                         Please extract the requested information from the webpage content.`;
     
-    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
+        model: GPT41_MODEL,
         messages: [
           {
             role: 'system',
