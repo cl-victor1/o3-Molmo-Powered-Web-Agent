@@ -13,6 +13,9 @@ const AZURE_OPENAI_API_KEY = "B5XSjzTCDdRyQHyLEa33rJ75cH1V7JNXVjggUwFm9BSvJUEB1b
 const AZURE_OPENAI_API_VERSION = "2024-12-01-preview";
 const AZURE_OPENAI_DEPLOYMENT = "o3-standard"; // Using o3 model as specified in the original code
 
+// GPT-4.1 Configuration for enhanced NLP tasks
+const GPT41_DEPLOYMENT = "gpt-4.1-standard"; // GPT-4.1 model for text analysis and understanding
+
 // Molmo API Configuration
 const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
 const MOLMO_OFFICIAL_API_URL = "https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream"; // Official Molmo API
@@ -226,6 +229,145 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     });
     return true;
   }
+  
+  // Handle getting enhanced NLP analysis for a tab
+  if (request.action === 'getEnhancedAnalysis') {
+    const { tabId } = request;
+    const context = tabContext.get(tabId) || {};
+    
+    sendResponse({
+      taskAnalysis: context.taskAnalysis || null,
+      contentAnalysis: context.contentAnalysis || null,
+      completionAnalysis: context.completionAnalysis || null,
+      lastCommand: context.lastCommand || null,
+      lastResponse: context.lastResponse || null
+    });
+    return true;
+  }
+  
+  // Handle request to analyze current page with GPT-4.1
+  if (request.action === 'analyzePageWithGPT41') {
+    const { tabId, analysisType } = request;
+    
+    // Get enhanced page content
+    chrome.scripting.executeScript({
+      target: { tabId },
+      function: getEnhancedPageContent
+    }, async (result) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      
+      if (result && result[0] && result[0].result) {
+        const enhancedContent = result[0].result;
+        const context = tabContext.get(tabId) || {};
+        const lastCommand = context.lastCommand || 'General page analysis';
+        
+        try {
+          const analysis = await analyzePageContentWithGPT41(enhancedContent, lastCommand, analysisType || 'general');
+          sendResponse({ 
+            success: true, 
+            analysis,
+            analysisType: analysisType || 'general'
+          });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: error.message 
+          });
+        }
+      } else {
+        sendResponse({ 
+          success: false, 
+          error: 'Could not extract page content' 
+        });
+      }
+    });
+    
+    return true; // Indicates async response
+  }
+  
+  // Handle request to extract specific information with GPT-4.1
+  if (request.action === 'extractInformationWithGPT41') {
+    const { tabId, extractionTarget, context: extractionContext } = request;
+    
+    // Get enhanced page content
+    chrome.scripting.executeScript({
+      target: { tabId },
+      function: getEnhancedPageContent
+    }, async (result) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      
+      if (result && result[0] && result[0].result) {
+        const enhancedContent = result[0].result;
+        
+        try {
+          const extractedInfo = await extractSpecificInformation(enhancedContent, extractionTarget, extractionContext || '');
+          sendResponse({ 
+            success: true, 
+            extractedInfo,
+            extractionTarget
+          });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: error.message 
+          });
+        }
+      } else {
+        sendResponse({ 
+          success: false, 
+          error: 'Could not extract page content' 
+        });
+      }
+    });
+    
+    return true; // Indicates async response
+  }
+  
+  // Handle request to get page structure analysis
+  if (request.action === 'getPageStructure') {
+    const { tabId } = request;
+    
+    // Get both enhanced content and HTML structure
+    Promise.all([
+      chrome.scripting.executeScript({
+        target: { tabId },
+        function: getEnhancedPageContent
+      }),
+      chrome.scripting.executeScript({
+        target: { tabId },
+        function: getHTMLStructure
+      })
+    ]).then(([enhancedResult, structureResult]) => {
+      const response = {
+        success: true,
+        enhancedContent: null,
+        htmlStructure: null
+      };
+      
+      if (enhancedResult && enhancedResult[0] && enhancedResult[0].result) {
+        response.enhancedContent = enhancedResult[0].result;
+      }
+      
+      if (structureResult && structureResult[0] && structureResult[0].result) {
+        response.htmlStructure = structureResult[0].result;
+      }
+      
+      sendResponse(response);
+    }).catch(error => {
+      sendResponse({ 
+        success: false, 
+        error: error.message 
+      });
+    });
+    
+    return true; // Indicates async response
+  }
 });
 
 // Update context for specific tab
@@ -257,8 +399,9 @@ function updateTabContext(tabId, url) {
 // Process command with OpenAI API
 async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute) {
   try {
-    // Get page content for context
+    // Get enhanced page content for better analysis
     let pageContent = '';
+    let enhancedContent = null;
     
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -268,15 +411,26 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
         console.log('Cannot access restricted URL for content extraction:', tab.url);
         pageContent = `Restricted URL: ${tab.url}`;
       } else {
-        // Execute content script to get page information
-        const result = await chrome.scripting.executeScript({
-          target: { tabId },
-          function: getPageContent
-        });
+        // Execute content script to get both basic and enhanced page information
+        const [basicResult, enhancedResult] = await Promise.all([
+          chrome.scripting.executeScript({
+            target: { tabId },
+            function: getPageContent
+          }),
+          chrome.scripting.executeScript({
+            target: { tabId },
+            function: getEnhancedPageContent
+          })
+        ]);
         
-        // Extract page content from script execution result
-        if (result && result[0] && result[0].result) {
-          pageContent = result[0].result;
+        // Extract content from script execution results
+        if (basicResult && basicResult[0] && basicResult[0].result) {
+          pageContent = basicResult[0].result;
+        }
+        
+        if (enhancedResult && enhancedResult[0] && enhancedResult[0].result) {
+          enhancedContent = enhancedResult[0].result;
+          console.log('Enhanced content extracted:', enhancedContent);
         }
       }
     } catch (error) {
@@ -284,10 +438,54 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
       // Continue with empty page content if there's an error
     }
     
-    // Update conversation history with user command
+    // Step 1: Analyze task requirements using GPT-4.1
+    let taskAnalysis = null;
+    if (enhancedContent) {
+      try {
+        console.log('Performing task analysis with GPT-4.1...');
+        taskAnalysis = await analyzeTaskRequirements(command, enhancedContent);
+        console.log('Task analysis completed:', taskAnalysis);
+      } catch (error) {
+        console.error('Error in task analysis:', error);
+      }
+    }
+    
+    // Step 2: Get content analysis using GPT-4.1 for better understanding
+    let contentAnalysis = null;
+    if (enhancedContent) {
+      try {
+        console.log('Performing content analysis with GPT-4.1...');
+        contentAnalysis = await analyzePageContentWithGPT41(enhancedContent, command, 'task_understanding');
+        console.log('Content analysis completed:', contentAnalysis);
+      } catch (error) {
+        console.error('Error in content analysis:', error);
+      }
+    }
+    
+    // Step 3: Prepare enhanced context for O3 model
+    let enhancedContext = '';
+    if (taskAnalysis) {
+      enhancedContext += `\nTask Analysis: ${JSON.stringify(taskAnalysis)}\n`;
+    }
+    
+    if (contentAnalysis) {
+      enhancedContext += `\nContent Analysis: ${contentAnalysis}\n`;
+    }
+    
+    if (enhancedContent) {
+      enhancedContext += `\nEnhanced Page Summary: ${getEnhancedPageContentSummary(enhancedContent)}\n`;
+    }
+    
+    // Update conversation history with enhanced context
+    const contextualCommand = `${enhancedContext}
+Current URL: ${url}
+Page content summary: ${getPageContentSummary(pageContent)}
+
+User command: ${command}`;
+    
     conversationHistory.push({
       role: 'user',
-      content: `Current URL: ${url}\nPage content summary: ${getPageContentSummary(pageContent)}\n\nUser command: ${command}`
+      content: contextualCommand
     });
     
     // Make sure history doesn't get too long (keep last 10 messages)
@@ -296,13 +494,13 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
     }
     
     // Check if we have an API key
-    //const finalApiKey = apiKey || AZURE_OPENAI_API_KEY;
     const finalApiKey =  AZURE_OPENAI_API_KEY; // use Azure for now
     if (!finalApiKey) {
       throw new Error('No Azure OpenAI API key available. Azure credentials are hardcoded in the extension.');
     }
     
-    // Call OpenAI API
+    // Step 4: Call O3 model for action generation with enhanced context
+    console.log('Calling O3 model for action generation...');
     const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
       method: 'POST',
       headers: {
@@ -314,7 +512,14 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
           {
             role: 'system',
             content: `You are a helpful web browser assistant that can automate browsing tasks. 
-                      You'll be given a user command and information about the current webpage.
+                      You'll be given a user command and enhanced information about the current webpage including task analysis and content insights.
+                      
+                      ENHANCED CAPABILITIES:
+                      - You now have detailed page structure analysis
+                      - Task requirements have been pre-analyzed
+                      - Content patterns have been identified
+                      - Use this enhanced context to make better decisions
+                      
                       Respond with specific actions to take, formatted as a JSON object.
                       
                       You can use these actions:
@@ -351,6 +556,11 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
                       - "second video" for the second video
                       - "video titled [title]" for a specific video by title
                       
+                      ENHANCED DECISION MAKING:
+                      - Use the task analysis to understand the complexity and approach needed
+                      - Leverage content analysis to identify the most relevant page areas
+                      - Consider the page structure and navigation patterns
+                      - Make intelligent decisions about element targeting based on content insights
                       
                       If you need to perform multiple actions, return them as an array:
                       [{"action": "type", "selector": "input#search", "text": "cats"}, 
@@ -390,11 +600,15 @@ async function processCommandWithOpenAI(command, apiKey, tabId, url, autoExecute
       const context = tabContext.get(tabId);
       context.lastCommand = command;
       context.lastResponse = aiResponse;
+      context.taskAnalysis = taskAnalysis; // Store task analysis for later use
+      context.contentAnalysis = contentAnalysis; // Store content analysis for later use
       
       // Save to persistent storage
       chrome.storage.local.set({
         [`tab_${tabId}_command`]: command,
-        [`tab_${tabId}_response`]: aiResponse
+        [`tab_${tabId}_response`]: aiResponse,
+        [`tab_${tabId}_task_analysis`]: taskAnalysis,
+        [`tab_${tabId}_content_analysis`]: contentAnalysis
       });
     }
     
@@ -886,19 +1100,30 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = tab.url;
     
-    // Get page content for analysis
+    // Get enhanced page content for better analysis
     let pageContent = '';
+    let enhancedContent = null;
     
     try {
-      // Execute content script to get page information
-      const result = await chrome.scripting.executeScript({
-        target: { tabId },
-        function: getPageContent
-      });
+      // Execute content scripts to get both basic and enhanced page information
+      const [basicResult, enhancedResult] = await Promise.all([
+        chrome.scripting.executeScript({
+          target: { tabId },
+          function: getPageContent
+        }),
+        chrome.scripting.executeScript({
+          target: { tabId },
+          function: getEnhancedPageContent
+        })
+      ]);
       
-      // Extract page content from script execution result
-      if (result && result[0] && result[0].result) {
-        pageContent = result[0].result;
+      // Extract content from script execution results
+      if (basicResult && basicResult[0] && basicResult[0].result) {
+        pageContent = basicResult[0].result;
+      }
+      
+      if (enhancedResult && enhancedResult[0] && enhancedResult[0].result) {
+        enhancedContent = enhancedResult[0].result;
       }
     } catch (error) {
       console.error('Error getting page content:', error);
@@ -908,14 +1133,120 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
     // Get context for this tab
     const context = tabContext.get(tabId) || { lastCommand: '' };
     const lastCommand = context.lastCommand || '';
+    const taskAnalysis = context.taskAnalysis || null;
+    
+    // Step 1: Use GPT-4.1 to analyze task completion with enhanced understanding
+    let completionAnalysis = null;
+    if (enhancedContent && lastCommand) {
+      try {
+        console.log('Analyzing task completion with GPT-4.1...');
+        
+        const systemPrompt = `You are an expert task completion analyst for web automation.
+                              Analyze the current page state and determine if the user's task has been completed successfully.
+                              
+                              Consider:
+                              1. The original task requirements and constraints
+                              2. Current page content and structure
+                              3. Evidence of successful task completion
+                              4. Any error messages or failure indicators
+                              5. Page changes that indicate progress or completion
+                              
+                              Provide your analysis in a structured JSON format:
+                              {
+                                "taskCompleted": true/false,
+                                "confidence": "high/medium/low",
+                                "reasoning": "explanation of your analysis",
+                                "evidence": ["list of evidence supporting your conclusion"],
+                                "nextSteps": "what should happen next",
+                                "requiresAction": true/false,
+                                "suggestedActions": ["list of actions if more work is needed"]
+                              }`;
+        
+        let userPrompt = `Original Task: "${lastCommand}"
+                         Current URL: ${url}
+                         Enhanced Page Content: ${JSON.stringify(enhancedContent, null, 2)}`;
+        
+        if (taskAnalysis) {
+          userPrompt += `\nOriginal Task Analysis: ${JSON.stringify(taskAnalysis)}`;
+        }
+        
+        userPrompt += '\n\nPlease analyze if the task has been completed and provide structured insights.';
+        
+        const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': AZURE_OPENAI_API_KEY
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'system',
+                content: systemPrompt
+              },
+              {
+                role: 'user',
+                content: userPrompt
+              }
+            ],
+            max_tokens: 1000,
+            temperature: 0.1
+          })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const analysis = data.choices[0]?.message?.content || '';
+          
+          try {
+            completionAnalysis = JSON.parse(analysis);
+            console.log('GPT-4.1 completion analysis:', completionAnalysis);
+          } catch (parseError) {
+            console.log('Could not parse completion analysis as JSON, using as text');
+            completionAnalysis = { analysis: analysis, parseError: true };
+          }
+        }
+      } catch (error) {
+        console.error('Error in GPT-4.1 completion analysis:', error);
+      }
+    }
+    
+    // Step 2: If GPT-4.1 indicates task is complete, return success
+    if (completionAnalysis && completionAnalysis.taskCompleted === true) {
+      const confidence = completionAnalysis.confidence || 'medium';
+      const reasoning = completionAnalysis.reasoning || 'Task appears to be completed based on page analysis';
+      
+      console.log(`Task marked as completed by GPT-4.1 with ${confidence} confidence: ${reasoning}`);
+      return `TASK_COMPLETED: ${reasoning}. Evidence: ${(completionAnalysis.evidence || []).join(', ')}`;
+    }
+    
+    // Step 3: If GPT-4.1 indicates more actions are needed, continue with O3 model
+    if (completionAnalysis && completionAnalysis.requiresAction === true && completionAnalysis.suggestedActions) {
+      console.log('GPT-4.1 suggests continuing with additional actions:', completionAnalysis.suggestedActions);
+      
+      // Execute the suggested actions with recursion tracking
+      await executeActionsInTabWithDepth(tabId, completionAnalysis.suggestedActions, recursionDepth + 1);
+      return `Task continuation based on GPT-4.1 analysis: ${completionAnalysis.reasoning}`;
+    }
+    
+    // Step 4: Fallback to O3 model for action planning if GPT-4.1 analysis is unclear
+    console.log('Using O3 model for task completion analysis and action planning...');
     
     // Update conversation history with current page state
+    const contextualPrompt = `Current URL: ${url}
+Page content summary: ${getPageContentSummary(pageContent)}
+Enhanced page summary: ${getEnhancedPageContentSummary(enhancedContent)}
+
+Is the task "${lastCommand}" completed? If not, what additional steps are needed?
+
+${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}` : ''}`;
+    
     conversationHistory.push({
       role: 'user',
-      content: `Current URL: ${url}\nPage content summary: ${getPageContentSummary(pageContent)}\n\nIs the task "${lastCommand}" completed? If not, what additional steps are needed?`
+      content: contextualPrompt
     });
     
-    // Call OpenAI API to analyze task completion
+    // Call O3 API to analyze task completion
     if (!AZURE_OPENAI_API_KEY) {
       throw new Error('No Azure OpenAI API key available for task analysis.');
     }
@@ -930,13 +1261,21 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
         messages: [
           {
             role: 'system',
-            content: `You are a helpful web browser automation assistant.
+            content: `You are a helpful web browser automation assistant with enhanced analysis capabilities.
                       Analyze the current page content and URL to determine if the user's task has been completed.
+                      You now have access to both basic page content and enhanced page analysis including GPT-4.1 insights.
+                      
                       If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
                       If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by a JSON array of actions needed to complete the task.
                       
                       IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
                       consider the task completed rather than continuing indefinitely.
+                      
+                      ENHANCED DECISION MAKING:
+                      - Consider GPT-4.1 analysis insights when available
+                      - Look for evidence of successful completion in page changes
+                      - Use enhanced page structure understanding for better decisions
+                      - Leverage task analysis insights for improved completion detection
                       
                       IMPORTANT SCROLLING GUIDELINES:
                       - The visual click system (object_name) automatically handles scrolling when elements are not found
@@ -983,10 +1322,12 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
     if (tabContext.has(tabId)) {
       const context = tabContext.get(tabId);
       context.lastResponse = aiResponse;
+      context.completionAnalysis = completionAnalysis; // Store GPT-4.1 analysis
       
       // Save to persistent storage
       chrome.storage.local.set({
-        [`tab_${tabId}_response`]: aiResponse
+        [`tab_${tabId}_response`]: aiResponse,
+        [`tab_${tabId}_completion_analysis`]: completionAnalysis
       });
     }
     
@@ -1466,6 +1807,205 @@ function getPageContent() {
   };
 }
 
+// Enhanced function to get detailed page content including HTML structure
+function getEnhancedPageContent() {
+  // Get basic page information
+  const title = document.title;
+  const url = window.location.href;
+  
+  // Get meta information
+  const metaInfo = {
+    description: document.querySelector('meta[name="description"]')?.getAttribute('content') || '',
+    keywords: document.querySelector('meta[name="keywords"]')?.getAttribute('content') || '',
+    author: document.querySelector('meta[name="author"]')?.getAttribute('content') || ''
+  };
+  
+  // Get page structure - headings hierarchy
+  const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+    .map(heading => ({
+      level: parseInt(heading.tagName.charAt(1)),
+      text: heading.innerText.trim(),
+      id: heading.id
+    }))
+    .slice(0, 20);
+  
+  // Get main content areas
+  const mainContent = [];
+  const contentSelectors = ['main', '[role="main"]', '.main-content', '.content', 'article', '.article'];
+  for (const selector of contentSelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      mainContent.push({
+        selector,
+        text: element.innerText.substring(0, 2000)
+      });
+      break; // Use the first found main content area
+    }
+  }
+  
+  // Get navigation elements
+  const navigation = Array.from(document.querySelectorAll('nav, .nav, .navigation, [role="navigation"]'))
+    .map(nav => ({
+      text: nav.innerText.trim().substring(0, 500),
+      links: Array.from(nav.querySelectorAll('a')).map(a => ({
+        text: a.innerText.trim(),
+        href: a.href
+      })).slice(0, 10)
+    }))
+    .slice(0, 3);
+  
+  // Get interactive elements with better detail
+  const interactiveElements = {
+    buttons: Array.from(document.querySelectorAll('button, [role="button"], .btn, input[type="submit"], input[type="button"]'))
+      .filter(btn => {
+        const rect = btn.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map(btn => ({
+        text: btn.innerText.trim() || btn.value || btn.getAttribute('aria-label') || '',
+        id: btn.id,
+        className: btn.className,
+        type: btn.type,
+        disabled: btn.disabled
+      }))
+      .slice(0, 30),
+    
+    inputs: Array.from(document.querySelectorAll('input, textarea, select'))
+      .filter(input => {
+        const rect = input.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map(input => ({
+        type: input.type || input.tagName.toLowerCase(),
+        name: input.name,
+        id: input.id,
+        placeholder: input.placeholder,
+        value: input.value,
+        required: input.required,
+        label: input.labels?.[0]?.innerText?.trim() || ''
+      }))
+      .slice(0, 20),
+    
+    links: Array.from(document.querySelectorAll('a[href]'))
+      .filter(link => {
+        const rect = link.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map(link => ({
+        text: link.innerText.trim(),
+        href: link.href,
+        title: link.title
+      }))
+      .slice(0, 30)
+  };
+  
+  // Get specific content patterns (tables, lists, etc.)
+  const structuredContent = {
+    tables: Array.from(document.querySelectorAll('table'))
+      .map(table => ({
+        headers: Array.from(table.querySelectorAll('th')).map(th => th.innerText.trim()),
+        rowCount: table.querySelectorAll('tr').length,
+        text: table.innerText.substring(0, 1000)
+      }))
+      .slice(0, 5),
+    
+    lists: Array.from(document.querySelectorAll('ul, ol'))
+      .map(list => ({
+        type: list.tagName.toLowerCase(),
+        items: Array.from(list.querySelectorAll('li')).map(li => li.innerText.trim()).slice(0, 10),
+        itemCount: list.querySelectorAll('li').length
+      }))
+      .slice(0, 10)
+  };
+  
+  // Get text content in chunks for better analysis
+  const textContent = {
+    fullText: document.body.innerText.substring(0, 8000),
+    paragraphs: Array.from(document.querySelectorAll('p'))
+      .map(p => p.innerText.trim())
+      .filter(text => text.length > 20)
+      .slice(0, 15)
+  };
+  
+  // Get error messages or alerts
+  const alerts = Array.from(document.querySelectorAll('.alert, .error, .warning, .success, [role="alert"]'))
+    .map(alert => ({
+      text: alert.innerText.trim(),
+      className: alert.className,
+      type: alert.getAttribute('role') || 'unknown'
+    }))
+    .slice(0, 5);
+  
+  return {
+    title,
+    url,
+    metaInfo,
+    headings,
+    mainContent,
+    navigation,
+    interactiveElements,
+    structuredContent,
+    textContent,
+    alerts,
+    timestamp: new Date().toISOString()
+  };
+}
+
+// Function to extract HTML structure for analysis
+function getHTMLStructure() {
+  const structure = {
+    // Document structure
+    doctype: document.doctype ? document.doctype.name : 'unknown',
+    htmlLang: document.documentElement.lang || 'not-specified',
+    
+    // Head information
+    head: {
+      title: document.title,
+      metaTags: Array.from(document.querySelectorAll('meta')).map(meta => ({
+        name: meta.name,
+        property: meta.property,
+        content: meta.content,
+        httpEquiv: meta.httpEquiv
+      })).slice(0, 20),
+      stylesheets: Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(link => link.href).slice(0, 10),
+      scripts: Array.from(document.querySelectorAll('script[src]')).map(script => script.src).slice(0, 10)
+    },
+    
+    // Body structure
+    body: {
+      classes: document.body.className.split(' ').filter(c => c.trim()),
+      id: document.body.id,
+      dataAttributes: Object.fromEntries(
+        Array.from(document.body.attributes)
+          .filter(attr => attr.name.startsWith('data-'))
+          .map(attr => [attr.name, attr.value])
+      )
+    },
+    
+    // Semantic structure
+    semanticElements: {
+      header: !!document.querySelector('header'),
+      nav: !!document.querySelector('nav'),
+      main: !!document.querySelector('main'),
+      aside: !!document.querySelector('aside'),
+      footer: !!document.querySelector('footer'),
+      article: document.querySelectorAll('article').length,
+      section: document.querySelectorAll('section').length
+    },
+    
+    // Content statistics
+    contentStats: {
+      totalElements: document.querySelectorAll('*').length,
+      textNodes: document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT).nextNode() ? 'present' : 'none',
+      images: document.querySelectorAll('img').length,
+      videos: document.querySelectorAll('video').length,
+      iframes: document.querySelectorAll('iframe').length
+    }
+  };
+  
+  return structure;
+}
+
 // Helper function to get a text summary from page content
 function getPageContentSummary(pageContent) {
   // If pageContent is null, undefined, or not an object
@@ -1495,4 +2035,316 @@ function getPageContentSummary(pageContent) {
   }
   
   return summary.trim() || 'No content details available';
+}
+
+// Enhanced function to get detailed summary from enhanced page content
+function getEnhancedPageContentSummary(enhancedContent) {
+  if (!enhancedContent || typeof enhancedContent !== 'object') {
+    return 'No enhanced content available';
+  }
+  
+  let summary = '';
+  
+  // Basic information
+  if (enhancedContent.title) {
+    summary += `Title: ${enhancedContent.title}\n`;
+  }
+  
+  if (enhancedContent.url) {
+    summary += `URL: ${enhancedContent.url}\n`;
+  }
+  
+  // Meta information
+  if (enhancedContent.metaInfo?.description) {
+    summary += `Meta Description: ${enhancedContent.metaInfo.description}\n`;
+  }
+  
+  // Page structure
+  if (enhancedContent.headings && enhancedContent.headings.length > 0) {
+    summary += `Headings: ${enhancedContent.headings.slice(0, 5).map(h => `H${h.level}: ${h.text}`).join(', ')}\n`;
+  }
+  
+  // Main content
+  if (enhancedContent.mainContent && enhancedContent.mainContent.length > 0) {
+    summary += `Main Content: ${enhancedContent.mainContent[0].text.substring(0, 500)}...\n`;
+  }
+  
+  // Interactive elements summary
+  if (enhancedContent.interactiveElements) {
+    const elements = enhancedContent.interactiveElements;
+    if (elements.buttons?.length > 0) {
+      summary += `Buttons: ${elements.buttons.slice(0, 5).map(b => b.text).filter(t => t).join(', ')}\n`;
+    }
+    if (elements.inputs?.length > 0) {
+      summary += `Input Fields: ${elements.inputs.slice(0, 5).map(i => i.placeholder || i.label || i.type).filter(t => t).join(', ')}\n`;
+    }
+  }
+  
+  // Alerts or important messages
+  if (enhancedContent.alerts && enhancedContent.alerts.length > 0) {
+    summary += `Alerts: ${enhancedContent.alerts.map(a => a.text).join(', ')}\n`;
+  }
+  
+  return summary.trim() || 'No enhanced content details available';
+}
+
+// Function to call GPT-4.1 for enhanced text analysis and understanding
+async function analyzePageContentWithGPT41(enhancedContent, userCommand, analysisType = 'general') {
+  try {
+    console.log(`Calling GPT-4.1 for ${analysisType} analysis`);
+    
+    let systemPrompt = '';
+    let userPrompt = '';
+    
+    switch (analysisType) {
+      case 'task_understanding':
+        systemPrompt = `You are an expert web automation assistant specializing in task understanding and content analysis.
+                        Analyze the provided webpage content and user command to understand what specific actions are needed.
+                        Focus on:
+                        1. Identifying relevant content areas for the task
+                        2. Understanding the context and website type
+                        3. Recognizing patterns that indicate task completion
+                        4. Suggesting specific elements to interact with
+                        
+                        Provide a structured analysis with:
+                        - Task type classification
+                        - Relevant content areas identified
+                        - Key elements for interaction
+                        - Success criteria for task completion`;
+        
+        userPrompt = `Webpage Content: ${JSON.stringify(enhancedContent, null, 2)}
+                      
+                      User Command: ${userCommand}
+                      
+                      Please analyze this webpage content and provide insights for completing the user's task.`;
+        break;
+        
+      case 'content_extraction':
+        systemPrompt = `You are an expert at extracting and interpreting structured information from web pages.
+                        Analyze the provided webpage content to extract key information that would be relevant for automation tasks.
+                        Focus on:
+                        1. Identifying important data patterns (prices, ratings, names, etc.)
+                        2. Understanding content hierarchy and relationships
+                        3. Recognizing form structures and input requirements
+                        4. Extracting relevant text and numerical data
+                        
+                        Provide structured extraction results with clear categorization.`;
+        
+        userPrompt = `Webpage Content: ${JSON.stringify(enhancedContent, null, 2)}
+                      
+                      User Command: ${userCommand}
+                      
+                      Please extract and structure the most relevant information from this webpage for the given task.`;
+        break;
+        
+      case 'action_planning':
+        systemPrompt = `You are an expert web automation strategist specializing in action sequence planning.
+                        Analyze the webpage content and user command to create an optimal action plan.
+                        Focus on:
+                        1. Breaking down complex tasks into simple steps
+                        2. Identifying the correct sequence of interactions
+                        3. Anticipating potential obstacles or edge cases
+                        4. Providing fallback strategies
+                        
+                        Create a detailed step-by-step plan with specific element targeting strategies.`;
+        
+        userPrompt = `Webpage Content: ${JSON.stringify(enhancedContent, null, 2)}
+                      
+                      User Command: ${userCommand}
+                      
+                      Please create a detailed action plan for completing this task on the given webpage.`;
+        break;
+        
+      default: // 'general'
+        systemPrompt = `You are an expert web content analyst and automation assistant.
+                        Analyze the provided webpage content in the context of the user's command.
+                        Provide insights about the page structure, content, and how it relates to the user's task.
+                        Focus on practical, actionable information that would help with web automation.`;
+        
+        userPrompt = `Webpage Content: ${JSON.stringify(enhancedContent, null, 2)}
+                      
+                      User Command: ${userCommand}
+                      
+                      Please analyze this webpage content and provide insights relevant to the user's task.`;
+    }
+    
+    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        max_tokens: 1500,
+        temperature: 0.1
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'GPT-4.1 API request failed');
+    }
+    
+    const data = await response.json();
+    const analysis = data.choices[0]?.message?.content || '';
+    
+    console.log(`GPT-4.1 ${analysisType} analysis completed:`, analysis);
+    return analysis;
+  } catch (error) {
+    console.error(`Error calling GPT-4.1 for ${analysisType} analysis:`, error);
+    return `Error in GPT-4.1 analysis: ${error.message}`;
+  }
+}
+
+// Function to intelligently understand task requirements using GPT-4.1
+async function analyzeTaskRequirements(userCommand, pageContent) {
+  try {
+    console.log('Analyzing task requirements with GPT-4.1');
+    
+    const systemPrompt = `You are an expert task analysis assistant for web automation.
+                          Analyze the user command and provide structured insights about:
+                          1. Task type (search, navigation, form filling, data extraction, etc.)
+                          2. Key requirements and constraints
+                          3. Success criteria
+                          4. Potential challenges or edge cases
+                          5. Recommended approach strategy
+                          
+                          Provide your analysis in a structured JSON format:
+                          {
+                            "taskType": "category of task",
+                            "requirements": ["list of requirements"],
+                            "successCriteria": ["list of success indicators"],
+                            "challenges": ["potential issues"],
+                            "strategy": "recommended approach",
+                            "priority": "high/medium/low",
+                            "estimatedComplexity": "simple/moderate/complex"
+                          }`;
+    
+    const userPrompt = `User Command: "${userCommand}"
+                        
+                        Current Page Context: ${getEnhancedPageContentSummary(pageContent)}
+                        
+                        Please analyze this task and provide structured insights.`;
+    
+    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        max_tokens: 800,
+        temperature: 0.1
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'GPT-4.1 task analysis failed');
+    }
+    
+    const data = await response.json();
+    const analysis = data.choices[0]?.message?.content || '';
+    
+    try {
+      // Try to parse as JSON
+      return JSON.parse(analysis);
+    } catch (parseError) {
+      // If not JSON, return as structured text
+      return {
+        taskType: 'unknown',
+        analysis: analysis,
+        error: 'Could not parse as structured JSON'
+      };
+    }
+  } catch (error) {
+    console.error('Error analyzing task requirements:', error);
+    return {
+      taskType: 'unknown',
+      error: error.message
+    };
+  }
+}
+
+// Function to extract specific information using GPT-4.1
+async function extractSpecificInformation(pageContent, extractionTarget, context = '') {
+  try {
+    console.log(`Extracting specific information: ${extractionTarget}`);
+    
+    const systemPrompt = `You are an expert information extraction assistant.
+                          Your job is to extract specific information from webpage content with high accuracy.
+                          
+                          Guidelines:
+                          1. Focus only on the requested information
+                          2. Provide exact values when possible
+                          3. If information is not found, state clearly that it's not available
+                          4. Include relevant context that might help with task completion
+                          5. Format your response clearly and concisely
+                          
+                          Extract the information in a structured format when possible.`;
+    
+    const userPrompt = `Webpage Content: ${JSON.stringify(pageContent, null, 2)}
+                        
+                        Extract Target: ${extractionTarget}
+                        
+                        Additional Context: ${context}
+                        
+                        Please extract the requested information from the webpage content.`;
+    
+    const response = await fetch(`${AZURE_OPENAI_ENDPOINT}openai/deployments/${GPT41_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.1
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'GPT-4.1 information extraction failed');
+    }
+    
+    const data = await response.json();
+    const extractedInfo = data.choices[0]?.message?.content || '';
+    
+    console.log('Information extraction completed:', extractedInfo);
+    return extractedInfo;
+  } catch (error) {
+    console.error('Error extracting specific information:', error);
+    return `Error in information extraction: ${error.message}`;
+  }
 } 
