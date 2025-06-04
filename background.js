@@ -1,3 +1,18 @@
+// Helper function to strip JavaScript-style comments from JSON
+function stripJsonComments(jsonString) {
+  // Remove single-line comments (// ...)
+  jsonString = jsonString.replace(/\/\/.*$/gm, '');
+  
+  // Remove multi-line comments (/* ... */)
+  jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '');
+  
+  // Clean up any extra whitespace or commas that might be left behind
+  jsonString = jsonString.replace(/,\s*([}\]])/g, '$1'); // Remove trailing commas
+  jsonString = jsonString.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+  
+  return jsonString;
+}
+
 // Initialize context for maintaining conversation history
 let conversationHistory = [];
 
@@ -614,19 +629,30 @@ User command: ${command}`;
     let actions = null;
     try {
       console.log('AI Response received:', aiResponse);
-      // Extract JSON object or array from the response
-      const jsonMatch = aiResponse.match(/(\{.*\}|\[.*\])/s);
-      console.log('JSON match found:', jsonMatch);
-      if (jsonMatch) {
-        console.log('Attempting to parse JSON:', jsonMatch[0]);
-        actions = JSON.parse(jsonMatch[0]);
-        console.log('Parsed actions:', actions);
-      } else {
-        console.log('No JSON pattern found in AI response');
-      }
+      // Strip comments from response before parsing
+      const cleanedResponse = stripJsonComments(aiResponse);
+      console.log('Cleaned response for parsing:', cleanedResponse);
+      
+      // Try to parse the cleaned response as JSON directly
+      actions = JSON.parse(cleanedResponse);
+      console.log('Parsed actions:', actions);
     } catch (error) {
-      console.error('Error parsing action JSON:', error);
-      console.error('Failed to parse:', jsonMatch ? jsonMatch[0] : 'No match');
+      // If direct parsing fails, try to find JSON within the response
+      try {
+        const jsonMatch = aiResponse.match(/(\{.*\}|\[.*\])/s);
+        if (jsonMatch) {
+          console.log('Attempting to parse JSON from match:', jsonMatch[0]);
+          // Strip comments from the matched JSON as well
+          const cleanedMatch = stripJsonComments(jsonMatch[0]);
+          console.log('Cleaned matched JSON:', cleanedMatch);
+          actions = JSON.parse(cleanedMatch);
+          console.log('Parsed actions from match:', actions);
+        } else {
+          console.log('No JSON pattern found in AI response');
+        }
+      } catch (matchError) {
+        console.log('Failed to parse JSON from response:', matchError.message);
+      }
     }
     
     // If actions are parsed successfully, execute them
