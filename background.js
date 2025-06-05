@@ -234,7 +234,7 @@ const taskExecutions = new Map();
 // Regular OpenAI API Configuration
 const OPENAI_API_ENDPOINT = "https://api.openai.com/v1";
 const OPENAI_API_KEY = "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"; // Set your OpenAI API key here
-const OPENAI_MODEL = "o3"; // Using o3-mini model (same as Azure deployment)
+const o3_MODEL = "o3"; // Using o3-mini model (same as Azure deployment)
 const GPT41_MODEL = "gpt-4.1"; // GPT-4 Turbo for text analysis and understanding
 
 // Molmo API Configuration
@@ -729,7 +729,7 @@ User command: ${command}`;
         'Authorization': `Bearer ${finalApiKey}`
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model: o3_MODEL,
         messages: [
           {
             role: 'system',
@@ -1405,7 +1405,7 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
             'Authorization': `Bearer ${OPENAI_API_KEY}`
           },
           body: JSON.stringify({
-            model: GPT41_MODEL,
+            model: o3_MODEL,
             messages: [
               {
                 role: 'system',
@@ -1416,8 +1416,6 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
                 content: userPrompt
               }
             ],
-            max_tokens: 1000,
-            temperature: 0.1
           })
         });
         
@@ -1427,7 +1425,7 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
           
           try {
             completionAnalysis = JSON.parse(analysis);
-            console.log('GPT-4.1 completion analysis:', completionAnalysis);
+            console.log('o3 completion analysis:', completionAnalysis);
           } catch (parseError) {
             console.log('Could not parse completion analysis as JSON, using as text');
             completionAnalysis = { analysis: analysis, parseError: true };
@@ -1485,7 +1483,7 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
         'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model: o3_MODEL,
         messages: [
           {
             role: 'system',
