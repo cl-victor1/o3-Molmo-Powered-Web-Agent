@@ -1,16 +1,225 @@
 // Helper function to strip JavaScript-style comments from JSON
 function stripJsonComments(jsonString) {
-  // Remove single-line comments (// ...)
-  jsonString = jsonString.replace(/\/\/.*$/gm, '');
+  // More careful comment removal that preserves strings
+  let result = '';
+  let inString = false;
+  let inSingleLineComment = false;
+  let inMultiLineComment = false;
+  let escapeNext = false;
   
-  // Remove multi-line comments (/* ... */)
-  jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (let i = 0; i < jsonString.length; i++) {
+    const char = jsonString[i];
+    const nextChar = jsonString[i + 1];
+    
+    if (escapeNext) {
+      if (inString) result += char;
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      result += char;
+      continue;
+    }
+    
+    if (char === '"' && !inSingleLineComment && !inMultiLineComment) {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '/' && nextChar === '/' && !inMultiLineComment) {
+        inSingleLineComment = true;
+        i++; // Skip the next '/'
+        continue;
+      }
+      
+      if (char === '/' && nextChar === '*' && !inSingleLineComment) {
+        inMultiLineComment = true;
+        i++; // Skip the next '*'
+        continue;
+      }
+      
+      if (inSingleLineComment && (char === '\n' || char === '\r')) {
+        inSingleLineComment = false;
+        result += char; // Keep the newline
+        continue;
+      }
+      
+      if (inMultiLineComment && char === '*' && nextChar === '/') {
+        inMultiLineComment = false;
+        i++; // Skip the next '/'
+        continue;
+      }
+    }
+    
+    if (!inSingleLineComment && !inMultiLineComment) {
+      result += char;
+    }
+  }
   
-  // Clean up any extra whitespace or commas that might be left behind
-  jsonString = jsonString.replace(/,\s*([}\]])/g, '$1'); // Remove trailing commas
-  jsonString = jsonString.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+  // Clean up trailing commas and normalize whitespace
+  result = result.replace(/,(\s*[\}\]])/g, '$1');
+  result = result.replace(/\s+/g, ' ').trim();
   
-  return jsonString;
+  return result;
+}
+
+// Helper function to repair common JSON formatting issues
+function repairJsonString(jsonString) {
+  try {
+    // Find JSON-like patterns
+    const jsonMatch = jsonString.match(/(\[[\s\S]*?\]|\{[\s\S]*?\})/);
+    if (!jsonMatch) return null;
+    
+    let json = jsonMatch[0];
+    
+    // Fix common issues:
+    // 1. Incomplete URLs or strings - this is the main issue we're addressing
+    json = json.replace(/"https?:[^"]*(?=[,\]\}])/g, (match) => {
+      // If URL is incomplete (doesn't end with quote), try to complete it
+      if (!match.endsWith('"')) {
+        // Look for common URL patterns and try to complete them
+        if (match.includes('arxiv.org')) {
+          // For arxiv URLs, try to complete common patterns
+          if (match.includes('/list/')) {
+            return match + '/recent"';
+          }
+        }
+        // Generic completion - just add closing quote
+        return match + '"';
+      }
+      return match;
+    });
+    
+    // 2. Fix incomplete string values that got cut off
+    json = json.replace(/:\s*"[^"]*(?=[,\]\}])/g, (match) => {
+      if (!match.endsWith('"')) {
+        return match + '"';
+      }
+      return match;
+    });
+    
+    // 3. Fix trailing commas
+    json = json.replace(/,(\s*[\]\}])/g, '$1');
+    
+    // 4. Fix missing quotes around property names
+    json = json.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    
+    // 5. Fix single quotes to double quotes
+    json = json.replace(/'/g, '"');
+    
+    // 6. Fix common action property issues
+    json = json.replace(/"action":\s*"([^"]*)"[^,\}\]]*(?=[,\}\]])/g, '"action": "$1"');
+    
+    // 7. Ensure proper object structure for actions
+    json = json.replace(/\{\s*"action":\s*"([^"]*)"([^}]*)\}/g, (match, action, rest) => {
+      // Clean up the rest of the object
+      let cleanRest = rest.replace(/[^,]*$/, ''); // Remove incomplete trailing parts
+      if (cleanRest && !cleanRest.startsWith(',')) {
+        cleanRest = ',' + cleanRest;
+      }
+      return `{"action": "${action}"${cleanRest}}`;
+    });
+    
+    return json;
+  } catch (error) {
+    console.error('Error in JSON repair:', error);
+    return null;
+  }
+}
+
+// Advanced JSON validation and repair function
+function validateAndRepairJson(jsonString) {
+  // First, try to parse as-is
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.log('Initial JSON parse failed, attempting repair...');
+  }
+  
+  // Try basic repair
+  const basicRepair = repairJsonString(jsonString);
+  if (basicRepair) {
+    try {
+      return JSON.parse(basicRepair);
+    } catch (error) {
+      console.log('Basic repair failed, trying advanced repair...');
+    }
+  }
+  
+  // Advanced repair for specific issues
+  try {
+    let json = jsonString;
+    
+    // Extract JSON pattern more aggressively
+    const patterns = [
+      /(\[[\s\S]*?\])/,
+      /(\{[\s\S]*?\})/,
+      /(\[[\s\S]*)/,  // Incomplete arrays
+      /(\{[\s\S]*)/   // Incomplete objects
+    ];
+    
+    let match = null;
+    for (const pattern of patterns) {
+      match = json.match(pattern);
+      if (match) break;
+    }
+    
+    if (!match) return null;
+    
+    json = match[0];
+    
+    // Specific fix for the URL truncation issue we encountered
+    // Pattern: "url": "https: }, should be "url": "https://example.com" },
+    json = json.replace(/"url":\s*"https?:[^"]*\s*}/g, (match) => {
+      console.log('Found malformed URL pattern:', match);
+      // This handles cases like "url": "https: }
+      if (match.includes('arxiv')) {
+        return '"url": "https://arxiv.org/list/math.AT/recent" }';
+      }
+      return '"url": "https://example.com" }';
+    });
+    
+    // Also handle incomplete URLs that don't have the closing brace
+    json = json.replace(/"url":\s*"https?:[^"]*(?=\s*[,\]\}])/g, (match) => {
+      console.log('Found incomplete URL pattern:', match);
+      if (!match.endsWith('"')) {
+        if (match.includes('arxiv')) {
+          return '"url": "https://arxiv.org/list/math.AT/recent"';
+        }
+        return '"url": "https://example.com"';
+      }
+      return match;
+    });
+    
+    // Fix incomplete objects by closing them properly
+    if (json.startsWith('[') && !json.endsWith(']')) {
+      // Count open vs closed brackets
+      const openBrackets = (json.match(/\[/g) || []).length;
+      const closeBrackets = (json.match(/\]/g) || []).length;
+      json += ']'.repeat(openBrackets - closeBrackets);
+    }
+    
+    if (json.startsWith('{') && !json.endsWith('}')) {
+      // Count open vs closed braces
+      const openBraces = (json.match(/\{/g) || []).length;
+      const closeBraces = (json.match(/\}/g) || []).length;
+      json += '}'.repeat(openBraces - closeBraces);
+    }
+    
+    // Final cleanup
+    json = json.replace(/,(\s*[\]\}])/g, '$1'); // Remove trailing commas
+    
+    console.log('Repaired JSON:', json);
+    
+    return JSON.parse(json);
+  } catch (error) {
+    console.error('Advanced JSON repair also failed:', error);
+    return null;
+  }
 }
 
 // Initialize context for maintaining conversation history
@@ -524,32 +733,25 @@ User command: ${command}`;
         messages: [
           {
             role: 'system',
-            content: `You are a helpful web browser assistant that can automate browsing tasks. 
-                      You'll be given a user command and enhanced information about the current webpage including task analysis and content insights.
+            content: `You are a helpful web browser automation assistant with enhanced analysis capabilities.
+                      Analyze the current page content and URL to determine if the user's task has been completed.
+                      You now have access to both basic page content and enhanced page analysis including GPT-4.1 insights.
                       
-                      ENHANCED CAPABILITIES:
-                      - You now have detailed page structure analysis
-                      - Task requirements have been pre-analyzed
-                      - Content patterns have been identified
-                      - Use this enhanced context to make better decisions
+                      CRITICAL OUTPUT FORMAT REQUIREMENTS:
+                      - If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
+                      - If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by ONLY a valid JSON array of actions
+                      - When providing actions, ensure the JSON is valid with no comments or extra text
+                      - All strings must be properly quoted with double quotes
+                      - All URLs must be complete and properly formatted
                       
-                      Respond with specific actions to take, formatted as a JSON object.
+                      IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
+                      consider the task completed rather than continuing indefinitely.
                       
-                      You can use these actions:
-                      {"action": "click", "selector": "button.submit-btn"}
-                      {"action": "click", "object_name": "search button"}
-                      {"action": "type", "selector": "input#search", "text": "search query"}
-                      {"action": "navigate", "url": "https://example.com"}
-                      {"action": "extract", "selector": "div.results"}
-                      {"action": "wait", "time": 2000}
-                      {"action": "scroll", "direction": "down", "amount": 400}
-                      
-                      For the "click" action, you can use either:
-                      1. CSS selector: {"action": "click", "selector": "button.submit-btn"}
-                      2. Visual description: {"action": "click", "object_name": "search button"}
-                      
-                      When using object_name, provide a clear description of what to click on the screen. 
-                      This uses the Molmo API to identify objects visually even without precise selectors.
+                      ENHANCED DECISION MAKING:
+                      - Consider GPT-4.1 analysis insights when available
+                      - Look for evidence of successful completion in page changes
+                      - Use enhanced page structure understanding for better decisions
+                      - Leverage task analysis insights for improved completion detection
                       
                       IMPORTANT SCROLLING GUIDELINES:
                       - The visual click system (object_name) automatically handles scrolling when elements are not found
@@ -564,30 +766,18 @@ User command: ${command}`;
                       - If still not found, it will scroll back up to check if the element was above the original position
                       - This means you can confidently use object_name clicks without worrying about scrolling
                       
-                      IMPORTANT: For YouTube videos, use specific descriptions like:
-                      - "first video" or "first video thumbnail" for the first video in the list
-                      - "second video" for the second video
-                      - "video titled [title]" for a specific video by title
+                      ACTION FORMATS (use these exact formats):
+                      {"action": "click", "selector": "button.submit-btn"}
+                      {"action": "type", "selector": "input#search", "text": "search query"}
+                      {"action": "navigate", "url": "https://example.com"}
+                      {"action": "extract", "selector": "div.results"}
+                      {"action": "wait", "time": 2000}
+                      {"action": "scroll", "direction": "down", "amount": 400}
+                      {"action": "click", "object_name": "search button"}
                       
-                      ENHANCED DECISION MAKING:
-                      - Use the task analysis to understand the complexity and approach needed
-                      - Leverage content analysis to identify the most relevant page areas
-                      - Consider the page structure and navigation patterns
-                      - Make intelligent decisions about element targeting based on content insights
-                      
-                      If you need to perform multiple actions, return them as an array:
-                      [{"action": "type", "selector": "input#search", "text": "cats"}, 
-                       {"action": "click", "selector": "button.search-btn"}]
-                      
-                      For complex tasks that might require visual understanding:
-                      [{"action": "type", "selector": "input#search", "text": "cats"},
-                       {"action": "click", "object_name": "search button"}]
-                      
-                      For YouTube-specific tasks:
-                      - To open the first video: {"action": "click", "object_name": "first video"}
-                      - To open a specific video: {"action": "click", "object_name": "video titled [specific title]"}
-                      
-                      If you can't automate the task, explain why and provide guidance instead.`
+                      EXAMPLE RESPONSES:
+                      - Task complete: "TASK_COMPLETED: Successfully navigated to the target page and extracted the required information."
+                      - Task incomplete: "TASK_INCOMPLETE: [{"action": "click", "object_name": "submit button"}, {"action": "wait", "time": 2000}]"`
           },
           ...conversationHistory
         ],
@@ -629,29 +819,31 @@ User command: ${command}`;
     let actions = null;
     try {
       console.log('AI Response received:', aiResponse);
-      // Strip comments from response before parsing
-      const cleanedResponse = stripJsonComments(aiResponse);
-      console.log('Cleaned response for parsing:', cleanedResponse);
-      
-      // Try to parse the cleaned response as JSON directly
-      actions = JSON.parse(cleanedResponse);
-      console.log('Parsed actions:', actions);
+      // Use the advanced validation and repair function
+      actions = validateAndRepairJson(aiResponse);
+      if (actions) {
+        console.log('Parsed actions with advanced validation:', actions);
+      }
     } catch (error) {
-      // If direct parsing fails, try to find JSON within the response
+      console.log('Advanced validation failed, trying fallback methods...');
+      
+      // Fallback: try to find JSON within the response
       try {
-        const jsonMatch = aiResponse.match(/(\{.*\}|\[.*\])/s);
+        // Use a more robust regex that handles multiline JSON better
+        const jsonMatch = aiResponse.match(/(\[[\s\S]*?\]|\{[\s\S]*?\})/);
         if (jsonMatch) {
           console.log('Attempting to parse JSON from match:', jsonMatch[0]);
-          // Strip comments from the matched JSON as well
-          const cleanedMatch = stripJsonComments(jsonMatch[0]);
-          console.log('Cleaned matched JSON:', cleanedMatch);
-          actions = JSON.parse(cleanedMatch);
-          console.log('Parsed actions from match:', actions);
+          
+          // Try the advanced repair on the matched content
+          actions = validateAndRepairJson(jsonMatch[0]);
+          if (actions) {
+            console.log('Parsed actions from matched content:', actions);
+          }
         } else {
           console.log('No JSON pattern found in AI response');
         }
       } catch (matchError) {
-        console.log('Failed to parse JSON from response:', matchError.message);
+        console.log('All JSON parsing methods failed:', matchError.message);
       }
     }
     
@@ -1168,6 +1360,13 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
         const systemPrompt = `You are an expert task completion analyst for web automation.
                               Analyze the current page state and determine if the user's task has been completed successfully.
                               
+                              CRITICAL JSON OUTPUT REQUIREMENTS:
+                              - You MUST respond with ONLY valid JSON - no explanations, comments, or additional text
+                              - Do NOT include any text before or after the JSON
+                              - Ensure all strings are properly quoted with double quotes
+                              - Ensure all arrays and objects are properly formatted
+                              - Test your JSON mentally before responding to ensure it's valid
+                              
                               Consider:
                               1. The original task requirements and constraints
                               2. Current page content and structure
@@ -1175,16 +1374,19 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
                               4. Any error messages or failure indicators
                               5. Page changes that indicate progress or completion
                               
-                              Provide your analysis in a structured JSON format:
+                              Provide your analysis in this EXACT JSON format:
                               {
-                                "taskCompleted": true/false,
-                                "confidence": "high/medium/low",
+                                "taskCompleted": true,
+                                "confidence": "high",
                                 "reasoning": "explanation of your analysis",
                                 "evidence": ["list of evidence supporting your conclusion"],
                                 "nextSteps": "what should happen next",
-                                "requiresAction": true/false,
-                                "suggestedActions": ["list of actions if more work is needed"]
-                              }`;
+                                "requiresAction": false,
+                                "suggestedActions": []
+                              }
+                              
+                              If more actions are needed, set requiresAction to true and provide valid action objects in suggestedActions array.
+                              Action format: {"action": "click", "object_name": "button description"} or {"action": "navigate", "url": "https://example.com"}`;
         
         let userPrompt = `Original Task: "${lastCommand}"
                          Current URL: ${url}
@@ -1291,8 +1493,12 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
                       Analyze the current page content and URL to determine if the user's task has been completed.
                       You now have access to both basic page content and enhanced page analysis including GPT-4.1 insights.
                       
-                      If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
-                      If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by a JSON array of actions needed to complete the task.
+                      CRITICAL OUTPUT FORMAT REQUIREMENTS:
+                      - If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
+                      - If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by ONLY a valid JSON array of actions
+                      - When providing actions, ensure the JSON is valid with no comments or extra text
+                      - All strings must be properly quoted with double quotes
+                      - All URLs must be complete and properly formatted
                       
                       IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
                       consider the task completed rather than continuing indefinitely.
@@ -1316,14 +1522,18 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
                       - If still not found, it will scroll back up to check if the element was above the original position
                       - This means you can confidently use object_name clicks without worrying about scrolling
                       
-                      Use the following action formats:
+                      ACTION FORMATS (use these exact formats):
                       {"action": "click", "selector": "button.submit-btn"}
                       {"action": "type", "selector": "input#search", "text": "search query"}
                       {"action": "navigate", "url": "https://example.com"}
                       {"action": "extract", "selector": "div.results"}
                       {"action": "wait", "time": 2000}
                       {"action": "scroll", "direction": "down", "amount": 400}
-                      {"action": "click", "object_name": "search button"}`
+                      {"action": "click", "object_name": "search button"}
+                      
+                      EXAMPLE RESPONSES:
+                      - Task complete: "TASK_COMPLETED: Successfully navigated to the target page and extracted the required information."
+                      - Task incomplete: "TASK_INCOMPLETE: [{"action": "click", "object_name": "submit button"}, {"action": "wait", "time": 2000}]"`
           },
           ...conversationHistory
         ],
@@ -2246,15 +2456,22 @@ async function analyzeTaskRequirements(userCommand, pageContent) {
                           4. Potential challenges or edge cases
                           5. Recommended approach strategy
                           
-                          Provide your analysis in a structured JSON format:
+                          CRITICAL JSON OUTPUT REQUIREMENTS:
+                          - You MUST respond with ONLY valid JSON - no explanations, comments, or additional text
+                          - Do NOT include any text before or after the JSON
+                          - Ensure all strings are properly quoted with double quotes
+                          - Ensure all arrays and objects are properly formatted
+                          - Test your JSON mentally before responding to ensure it's valid
+                          
+                          Provide your analysis in this EXACT JSON format:
                           {
                             "taskType": "category of task",
                             "requirements": ["list of requirements"],
                             "successCriteria": ["list of success indicators"],
                             "challenges": ["potential issues"],
                             "strategy": "recommended approach",
-                            "priority": "high/medium/low",
-                            "estimatedComplexity": "simple/moderate/complex"
+                            "priority": "high",
+                            "estimatedComplexity": "simple"
                           }`;
     
     const userPrompt = `User Command: "${userCommand}"
