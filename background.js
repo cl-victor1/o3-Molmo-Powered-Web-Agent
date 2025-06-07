@@ -131,6 +131,70 @@ function repairJsonString(jsonString) {
   }
 }
 
+// New function to repair JSON using GPT-4.1
+async function repairJsonWithGPT41(malformedJson) {
+  try {
+    console.log('Attempting JSON repair with GPT-4.1...');
+    
+    const prompt = `You are a JSON repair specialist. Your task is to fix malformed JSON and return only valid JSON.
+
+Input JSON (possibly malformed):
+${malformedJson}
+
+Rules:
+1. Return ONLY valid JSON, no explanations or markdown
+2. Fix common issues like unterminated strings, missing quotes, brackets, braces
+3. If the JSON represents an array of actions, maintain that structure
+4. If URLs are truncated or malformed, complete them reasonably
+5. Remove any trailing commas
+6. Ensure all strings are properly quoted and terminated
+7. Balance all brackets and braces
+
+Return the repaired JSON:`;
+
+    const response = await fetch(`${OPENAI_API_ENDPOINT}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: GPT41_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a JSON repair tool. Return only valid JSON without any explanations or formatting.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 2000
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`GPT-4.1 API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const repairedJson = data.choices[0].message.content.trim();
+    
+    console.log('GPT-4.1 repaired JSON:', repairedJson);
+    
+    // Try to parse the repaired JSON to validate it
+    const parsed = JSON.parse(repairedJson);
+    console.log('GPT-4.1 JSON repair successful');
+    return parsed;
+    
+  } catch (error) {
+    console.error('GPT-4.1 JSON repair failed:', error);
+    return null;
+  }
+}
+
 // Advanced JSON validation and repair function
 function validateAndRepairJson(jsonString) {
   // First, try to parse as-is
@@ -220,6 +284,27 @@ function validateAndRepairJson(jsonString) {
     console.error('Advanced JSON repair also failed:', error);
     return null;
   }
+}
+
+// Enhanced version that includes GPT-4.1 repair as an additional layer
+async function validateAndRepairJsonWithGPT41(jsonString) {
+  // First, try the existing validation and repair methods
+  const existingResult = validateAndRepairJson(jsonString);
+  if (existingResult) {
+    return existingResult;
+  }
+  
+  console.log('All existing JSON repair methods failed, trying GPT-4.1 repair...');
+  
+  // If all existing methods fail, try GPT-4.1 repair
+  const gpt41Result = await repairJsonWithGPT41(jsonString);
+  if (gpt41Result) {
+    console.log('GPT-4.1 successfully repaired the JSON');
+    return gpt41Result;
+  }
+  
+  console.log('All JSON repair methods including GPT-4.1 have failed');
+  return null;
 }
 
 // Initialize context for maintaining conversation history
@@ -819,13 +904,13 @@ User command: ${command}`;
     let actions = null;
     try {
       console.log('AI Response received:', aiResponse);
-      // Use the advanced validation and repair function
-      actions = validateAndRepairJson(aiResponse);
+      // Use the enhanced validation and repair function with GPT-4.1
+      actions = await validateAndRepairJsonWithGPT41(aiResponse);
       if (actions) {
-        console.log('Parsed actions with advanced validation:', actions);
+        console.log('Parsed actions with enhanced validation (including GPT-4.1):', actions);
       }
     } catch (error) {
-      console.log('Advanced validation failed, trying fallback methods...');
+      console.log('Enhanced validation failed, trying fallback methods...');
       
       // Fallback: try to find JSON within the response
       try {
@@ -834,10 +919,10 @@ User command: ${command}`;
         if (jsonMatch) {
           console.log('Attempting to parse JSON from match:', jsonMatch[0]);
           
-          // Try the advanced repair on the matched content
-          actions = validateAndRepairJson(jsonMatch[0]);
+          // Try the enhanced repair on the matched content
+          actions = await validateAndRepairJsonWithGPT41(jsonMatch[0]);
           if (actions) {
-            console.log('Parsed actions from matched content:', actions);
+            console.log('Parsed actions from matched content with GPT-4.1:', actions);
           }
         } else {
           console.log('No JSON pattern found in AI response');
