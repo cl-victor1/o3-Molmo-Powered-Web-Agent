@@ -822,24 +822,19 @@ User command: ${command}`;
           {
             role: 'system',
             content: `You are a helpful web browser automation assistant with enhanced analysis capabilities.
-                      Analyze the current page content and URL to determine if the user's task has been completed.
+                      Analyze the current page content and URL to generate appropriate actions for the user's task.
                       You now have access to both basic page content and enhanced page analysis including GPT-4.1 insights.
                       
                       CRITICAL OUTPUT FORMAT REQUIREMENTS:
-                      - If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
-                      - If the task is incomplete, respond with "TASK_INCOMPLETE: " followed by ONLY a valid JSON array of actions
+                      - Always respond with ONLY a valid JSON array of actions
                       - When providing actions, ensure the JSON is valid with no comments or extra text
                       - All strings must be properly quoted with double quotes
                       - All URLs must be complete and properly formatted
                       
-                      IMPORTANT: Be conservative about continuing tasks. If you're unsure or if the page seems to have changed appropriately, 
-                      consider the task completed rather than continuing indefinitely.
-                      
-                      ENHANCED DECISION MAKING:
+                      ENHANCED ACTION GENERATION:
                       - Consider GPT-4.1 analysis insights when available
-                      - Look for evidence of successful completion in page changes
-                      - Use enhanced page structure understanding for better decisions
-                      - Leverage task analysis insights for improved completion detection
+                      - Use enhanced page structure understanding for better action targeting
+                      - Leverage task analysis insights for improved action planning
                       
                       IMPORTANT SCROLLING GUIDELINES:
                       - The visual click system (object_name) automatically handles scrolling when elements are not found
@@ -863,9 +858,8 @@ User command: ${command}`;
                       {"action": "scroll", "direction": "down", "amount": 400}
                       {"action": "click", "object_name": "search button"}
                       
-                      EXAMPLE RESPONSES:
-                      - Task complete: "TASK_COMPLETED: Successfully navigated to the target page and extracted the required information."
-                      - Task incomplete: "TASK_INCOMPLETE: [{"action": "click", "object_name": "submit button"}, {"action": "wait", "time": 2000}]"`
+                      EXAMPLE RESPONSE:
+                      [{"action": "click", "object_name": "submit button"}, {"action": "wait", "time": 2000}]`
           },
           ...conversationHistory
         ],
@@ -1439,11 +1433,11 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
     const lastCommand = context.lastCommand || '';
     const taskAnalysis = context.taskAnalysis || null;
     
-    // Step 1: Use GPT-4.1 to analyze task completion with enhanced understanding
+    // Step 1: Use O3 to analyze task completion with enhanced understanding
     let completionAnalysis = null;
     if (enhancedContent && lastCommand) {
       try {
-        console.log('Analyzing task completion with GPT-4.1...');
+        console.log('Analyzing task completion with O3...');
         
         const systemPrompt = `You are an expert task completion analyst for web automation.
                               Analyze the current page state and determine if the user's task has been completed successfully.
@@ -1513,36 +1507,36 @@ async function analyzePageAndContinue(tabId, recursionDepth = 0) {
           
           try {
             completionAnalysis = JSON.parse(analysis);
-            console.log('o3 completion analysis:', completionAnalysis);
+            console.log('O3 completion analysis:', completionAnalysis);
           } catch (parseError) {
             console.log('Could not parse completion analysis as JSON, using as text');
             completionAnalysis = { analysis: analysis, parseError: true };
           }
         }
       } catch (error) {
-        console.error('Error in GPT-4.1 completion analysis:', error);
+        console.error('Error in O3 completion analysis:', error);
       }
     }
     
-    // Step 2: If GPT-4.1 indicates task is complete, return success
+    // Step 2: If O3 indicates task is complete, return success
     if (completionAnalysis && completionAnalysis.taskCompleted === true) {
       const confidence = completionAnalysis.confidence || 'medium';
       const reasoning = completionAnalysis.reasoning || 'Task appears to be completed based on page analysis';
       
-      console.log(`Task marked as completed by GPT-4.1 with ${confidence} confidence: ${reasoning}`);
+      console.log(`Task marked as completed by O3 with ${confidence} confidence: ${reasoning}`);
       return `TASK_COMPLETED: ${reasoning}. Evidence: ${(completionAnalysis.evidence || []).join(', ')}`;
     }
     
-    // Step 3: If GPT-4.1 indicates more actions are needed, continue with O3 model
+    // Step 3: If O3 indicates more actions are needed, continue with additional actions
     if (completionAnalysis && completionAnalysis.requiresAction === true && completionAnalysis.suggestedActions) {
-      console.log('GPT-4.1 suggests continuing with additional actions:', completionAnalysis.suggestedActions);
+      console.log('O3 suggests continuing with additional actions:', completionAnalysis.suggestedActions);
       
       // Execute the suggested actions with recursion tracking
       await executeActionsInTabWithDepth(tabId, completionAnalysis.suggestedActions, recursionDepth + 1);
-      return `Task continuation based on GPT-4.1 analysis: ${completionAnalysis.reasoning}`;
+      return `Task continuation based on O3 analysis: ${completionAnalysis.reasoning}`;
     }
     
-    // Step 4: Fallback to O3 model for action planning if GPT-4.1 analysis is unclear
+    // Step 4: Fallback to O3 model for action planning if O3 analysis is unclear
     console.log('Using O3 model for task completion analysis and action planning...');
     
     // Update conversation history with current page state
@@ -1552,7 +1546,7 @@ Enhanced page summary: ${getEnhancedPageContentSummary(enhancedContent)}
 
 Is the task "${lastCommand}" completed? If not, what additional steps are needed?
 
-${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}` : ''}`;
+${completionAnalysis ? `O3 Analysis: ${JSON.stringify(completionAnalysis)}` : ''}`;
     
     conversationHistory.push({
       role: 'user',
@@ -1577,7 +1571,7 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
             role: 'system',
             content: `You are a helpful web browser automation assistant with enhanced analysis capabilities.
                       Analyze the current page content and URL to determine if the user's task has been completed.
-                      You now have access to both basic page content and enhanced page analysis including GPT-4.1 insights.
+                      You now have access to both basic page content and enhanced page analysis including previous task analysis.
                       
                       CRITICAL OUTPUT FORMAT REQUIREMENTS:
                       - If the task is complete, respond with "TASK_COMPLETED: " followed by a brief summary.
@@ -1593,7 +1587,7 @@ ${completionAnalysis ? `GPT-4.1 Analysis: ${JSON.stringify(completionAnalysis)}`
                       - Consider GPT-4.1 analysis insights when available
                       - Look for evidence of successful completion in page changes
                       - Use enhanced page structure understanding for better decisions
-                      - Leverage task analysis insights for improved completion detection
+                      - Leverage O3 task analysis insights for improved completion detection
                       
                       IMPORTANT SCROLLING GUIDELINES:
                       - The visual click system (object_name) automatically handles scrolling when elements are not found
