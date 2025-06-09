@@ -1,3 +1,15 @@
+// background.js
+
+// Regular OpenAI API Configuration
+const OPENAI_API_ENDPOINT = process.env.OPENAI_API_ENDPOINT;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; 
+const o3_MODEL = process.env.o3_MODEL; 
+const GPT41_MODEL = process.env.GPT41_MODEL; 
+// Molmo API Configuration
+const MOLMO_API_URL = process.env.MOLMO_API_URL; // SSH tunnel to Hyak Molmo service
+const MOLMO_OFFICIAL_API_URL = process.env.MOLMO_OFFICIAL_API_URL; // Official Molmo API
+const MOLMO_API_KEY = process.env.MOLMO_API_KEY; 
+
 // Helper function to strip JavaScript-style comments from JSON
 function stripJsonComments(jsonString) {
   // More careful comment removal that preserves strings
@@ -316,16 +328,7 @@ const tabContext = new Map();
 // Map to track ongoing task executions
 const taskExecutions = new Map();
 
-// Regular OpenAI API Configuration
-const OPENAI_API_ENDPOINT = "https://api.openai.com/v1";
-const OPENAI_API_KEY = "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"; // Set your OpenAI API key here
-const o3_MODEL = "o3"; // Using o3-mini model (same as Azure deployment)
-const GPT41_MODEL = "gpt-4.1"; // GPT-4 Turbo for text analysis and understanding
 
-// Molmo API Configuration
-const MOLMO_API_URL = "http://localhost:8000/molmo/point"; // SSH tunnel to Hyak Molmo service
-const MOLMO_OFFICIAL_API_URL = "https://ai2-reviz--uber-model-v4-synthetic.modal.run/completion_stream"; // Official Molmo API
-const MOLMO_API_KEY = "OYJnOH/zlDPN0DLq"; // Hardcoded Molmo API key
 
 // Molmo API selection: 'local' or 'official'
 let MOLMO_API_TYPE = 'official'; // Change to 'official' to use the official API

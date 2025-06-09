@@ -56,7 +56,7 @@ This extension supports two different ways to call the Molmo API:
 let MOLMO_API_TYPE = 'local';  // Change to 'official' for official API
 
 // Official API key is hardcoded in the extension
-const MOLMO_API_KEY = "OYJnOH/zlDPN0DLq";
+const MOLMO_API_KEY = "";
 ```
 
 ## API Response Format Differences
